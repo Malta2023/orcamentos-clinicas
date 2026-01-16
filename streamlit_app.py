@@ -12,19 +12,6 @@ def purificar(t):
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
     return t.upper().strip()
 
-def extrair_preco(v, n_exame):
-    n = purificar(n_exame)
-    # Regra absoluta para Crânio
-    if "RESSONANCIA" in n and "CRANIO" in n:
-        return 545.0
-    try:
-        if pd.isna(v) or v == "": return 0.0
-        limpo = str(v).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
-        nums = re.findall(r"\d+\.\d+|\d+", limpo)
-        return float(nums[0]) if nums else 0.0
-    except:
-        return 0.0
-
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
@@ -42,9 +29,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
             df = pd.read_csv(url, dtype=str).fillna("")
-            if clinica == "Labclinica":
-                df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
-            
             df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
@@ -55,37 +39,38 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 termo = purificar(original)
-                if termo == "GLICEMIA": termo = "GLICOSE"
                 
-                # --- NOVA LÓGICA DE BUSCA RÍGIDA ---
-                # Passo 1: Busca básica
-                palavras_busca = termo.split()
-                mask = pd.Series([True] * len(df), index=df.index)
-                for p in palavras_busca:
-                    mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
+                # --- FORÇA BRUTA: TRATAMENTO ESPECIAL PARA RESSONÂNCIA ---
+                if "RESSONANCIA" in termo and "ANGIO" not in termo:
+                    # Força o sistema a pegar a ressonância simples e ignorar Angio
+                    match = df[df['NOME_PURIFICADO'].str.contains("RESSONANCIA", na=False) & 
+                               ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                elif "TOMOGRAFIA" in termo and "ANGIO" not in termo:
+                    # Força o sistema a pegar tomografia simples e ignorar Angio
+                    match = df[df['NOME_PURIFICADO'].str.contains("TOMOGRAFIA", na=False) & 
+                               ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                else:
+                    # Busca normal para outros exames (Glicose, T4, etc)
+                    match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)]
                 
-                resultado = df[mask].copy()
-                
-                if not resultado.empty:
-                    # Passo 2: Se o usuário NÃO digitou "ANGIO", removemos tudo que tenha "ANGIO"
-                    if "ANGIO" not in termo:
-                        resultado = resultado[~resultado['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                # Desempate pelo tamanho do nome (o menor nome ganha = mais simples)
+                if not match.empty:
+                    match = match.copy()
+                    match['tam'] = match['NOME_PURIFICADO'].str.len()
+                    res = match.sort_values('tam').iloc[0]
                     
-                    # Passo 3: Se o usuário DIGITOU "ANGIO", priorizamos quem tem "ANGIO"
+                    nome_exame = res.iloc[0]
+                    
+                    # Preço fixo para Crânio conforme sua orientação
+                    if "CRANIO" in purificar(nome_exame):
+                        preco = 545.00
                     else:
-                        resultado = resultado[resultado['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-
-                    if not resultado.empty:
-                        # Passo 4: Se sobrar mais de um, pegamos o nome mais curto (exame base)
-                        resultado['tam'] = resultado['NOME_PURIFICADO'].str.len()
-                        res_final = resultado.sort_values('tam').iloc[0]
+                        preco_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                        nums = re.findall(r"\d+\.\d+|\d+", preco_str)
+                        preco = float(nums[0]) if nums else 0.0
                         
-                        nome_tab = res_final.iloc[0]
-                        preco = extrair_preco(res_final.iloc[1], nome_tab)
-                        total += preco
-                        texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
-                    else:
-                        texto_final += f"❌ {original}: (Não encontrado)\n"
+                    total += preco
+                    texto_final += f"✅ {nome_exame}: R$ {preco:.2f}\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
             
@@ -98,4 +83,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v5.0 | Filtro de Exclusão Garantido")
+st.caption("Senhor APP v5.1 | Correção Final Crânio")
