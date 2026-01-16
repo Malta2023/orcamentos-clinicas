@@ -3,76 +3,69 @@ import pandas as pd
 import re
 import unicodedata
 
+# Links Oficiais
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
 st.set_page_config(page_title="Senhor APP", page_icon="🏥")
 st.title("🏥 Senhor APP - Orçamentos Oficiais")
 
-def limpar_texto(texto):
+def limpar_tudo(texto):
     if not isinstance(texto, str): return ""
+    # Remove acentos e espaços inúteis
     texto = "".join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
     return texto.upper().strip()
 
-def converter_preco(valor, nome_exame=""):
-    # Correção manual para o RX Panorâmico de Coluna (conforme solicitado)
-    if "PANORAMICO" in limpar_texto(nome_exame) and "COLUNA" in limpar_texto(nome_exame):
-        return 154.00
+def extrair_preco(valor):
     try:
         if pd.isna(valor): return 0.0
+        # Remove R$, pontos de milhar e troca vírgula por ponto
         limpo = str(valor).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
-        nums = re.findall(r"[-+]?\d*\.\d+|\d+", limpo)
+        nums = re.findall(r"\d+\.\d+|\d+", limpo)
         return float(nums[0]) if nums else 0.0
     except: return 0.0
 
 clinica = st.selectbox("Selecione a Clínica:", ["Sabry", "Labclinica"])
-exames_raw = st.text_area("Cole os exames aqui:", height=200)
+exames_raw = st.text_area("Cole a lista de exames aqui:", height=200)
 
-if st.button("GERAR ORÇAMENTO EM LISTA"):
+if st.button("GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         df = pd.read_csv(url, dtype=str)
         
-        df['NOME_ORIGINAL'] = df.iloc[:, 0]
-        df['BUSCA_LIMPA'] = df.iloc[:, 0].apply(limpar_texto)
+        # Limpeza pesada na tabela para não dar erro
+        df['NOME_LIMPO'] = df.iloc[:, 0].apply(limpar_tudo)
+        df['PRECO_LIMPO'] = df.iloc[:, 1].apply(extrair_preco)
         
-        linhas = [l.strip().upper() for l in exames_raw.split('\n') if l.strip()]
-        lista_busca = []
-        for l in linhas:
-            if "TRAB" in l: continue
-            partes = re.split(r' E | & | / | \+ ', l)
-            for p in partes:
-                # TRADUÇÕES SALVAS
-                p = p.replace("RAIO X", "RX").replace("RAIO-X", "RX")
-                p = p.replace("TOMOGRAFIA", "TC")
-                p = p.replace("ULTRASSOM", "US").replace("ULTRASSONOGRAFIA", "US").replace("ULTRA-SOM", "US")
-                if "MAPA" in p: p = "MAPA"
-                
-                p = p.replace("EM JEJUM", "").replace("JEJUM", "").strip()
-                p_limpa = limpar_texto(p)
-                
-                if p_limpa in ["EAS", "URINA TIPO 1"]: p_limpa = "SUMARIO DE URINA"
-                if p_limpa == "GLICEMIA": p_limpa = "GLICOSE"
-                
-                if p_limpa: lista_busca.append(p_limpa)
-
-        texto_final = f"*Orçamento*\n*Clínica {clinica}*\n\nSegue seu orçamento completo:\n\n"
+        linhas_user = re.split(r'\n| E | & | \+ ', exames_raw.upper())
+        
+        texto_whats = f"*Orçamento - Clínica {clinica}*\n\n"
         total = 0.0
         
-        for termo in lista_busca:
-            resultado = df[df['BUSCA_LIMPA'].str.contains(termo, na=False)]
+        for item in linhas_user:
+            # Traduções e padronizações
+            item_proc = item.replace("RAIO X", "RX").replace("RX", "RX")
+            if "MAPA" in item_proc: item_proc = "MAPA"
+            if "GLICEMIA" in item_proc: item_proc = "GLICOSE"
             
-            if not resultado.empty:
-                melhor_opcao = resultado.sort_values(by=df.columns[1]).iloc[0] # Pega o primeiro
-                nome_tab = melhor_opcao['NOME_ORIGINAL']
-                preco_exame = converter_preco(melhor_opcao.iloc[1], nome_tab)
+            termo_busca = limpar_tudo(item_proc)
+            if not termo_busca: continue
+            
+            # Busca flexível: vê se o termo está dentro do nome na tabela
+            match = df[df['NOME_LIMPO'].str.contains(termo_busca, na=False)]
+            
+            if not match.empty:
+                # Pega a primeira opção encontrada
+                res = match.iloc[0]
+                # Correção manual do RX Panorâmico solicitada
+                preco = 154.0 if "PANORAMICO" in termo_busca else res['PRECO_LIMPO']
                 
-                total += preco_exame
-                texto_final += f"* ✅ {nome_tab}: R$ {preco_exame:.2f}\n"
+                total += preco
+                texto_whats += f"✅ {res.iloc[0]}: R$ {preco:.2f}\n"
             else:
-                texto_final += f"* ❌ {termo}: (Não encontrado)\n"
+                texto_whats += f"❌ {item.strip()}: Não encontrado\n"
         
-        texto_final += f"\n*Total: R$ {total:.2f}*\n\nQuando gostaria de agendar?"
-        st.code(texto_final, language="text")
+        texto_whats += f"\n*Total: R$ {total:.2f}*"
+        st.code(texto_whats, language="text")
     else:
-        st.error("Por favor, cole os exames!")
+        st.error("Cole os exames!")
