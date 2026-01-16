@@ -14,7 +14,7 @@ def purificar(t):
 
 def extrair_preco(v, n_exame):
     n = purificar(n_exame)
-    # Regra de Segurança para Ressonâncias de Crânio
+    # Regra de Segurança: Ressonância de Crânio sempre 545.00
     if "RESSONANCIA" in n and "CRANIO" in n:
         return 545.00
         
@@ -61,29 +61,30 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 
-                termo_limpo = purificar(original)
+                termo_usuario = purificar(original)
                 
-                # --- LÓGICA DE DIFERENCIAÇÃO (ANGIO VS SIMPLES) ---
+                # --- LÓGICA DE EXCLUSÃO RÍGIDA ---
                 match = pd.DataFrame()
                 
-                if "ANGIO" in termo_limpo:
-                    # Busca específica para ANGIO
+                # Se o usuário digitou a palavra ANGIO, busca específica para Angio
+                if "ANGIO" in termo_usuario:
                     match = df[df['NOME_PURIFICADO'].str.contains("ANGIO", na=False) & 
-                               df['NOME_PURIFICADO'].str.contains(termo_limpo.replace("ANGIO", "").strip(), na=False)]
-                elif "TOMOGRAFIA" in termo_limpo or "RESSONANCIA" in termo_limpo:
-                    # Busca para SIMPLES (Garante que NÃO tenha ANGIO no nome da tabela)
-                    palavras = termo_limpo.split()
+                               df['NOME_PURIFICADO'].str.contains(termo_usuario.replace("ANGIO", "").strip(), na=False)]
+                
+                # Se NÃO digitou ANGIO, mas digitou TOMO ou RESSONANCIA, bloqueia resultados com a palavra ANGIO
+                elif "TOMO" in termo_usuario or "RESSONANCIA" in termo_usuario:
                     mask = ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)
+                    palavras = termo_usuario.split()
                     for p in palavras:
                         mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
                     match = df[mask]
                 
-                # Se não caiu nas regras acima ou não achou nada, tenta busca padrão
+                # Busca reserva (Exata ou Palavras-chave) caso não entre nas regras de Angio/Simples
                 if match.empty:
-                    match = df[df['NOME_PURIFICADO'] == termo_limpo]
+                    match = df[df['NOME_PURIFICADO'] == termo_usuario]
                 
                 if match.empty:
-                    palavras = termo_limpo.split()
+                    palavras = termo_usuario.split()
                     if palavras:
                         mask = df['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
                         for p in palavras[1:]:
@@ -110,4 +111,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Por favor, cole os exames primeiro.")
 
-st.caption("Senhor APP v4.1 | Diferenciação Angio/Simples Ativada")
+st.caption("Senhor APP v4.3 | Separação Angio/Simples (Tomo e Ressonância)")
