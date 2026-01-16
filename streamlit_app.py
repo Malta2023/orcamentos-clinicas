@@ -14,6 +14,7 @@ def purificar(t):
 
 def extrair_preco(v, n_exame):
     n = purificar(n_exame)
+    # Regra absoluta para Crânio
     if "RESSONANCIA" in n and "CRANIO" in n:
         return 545.0
     try:
@@ -56,38 +57,45 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 termo = purificar(original)
                 if termo == "GLICEMIA": termo = "GLICOSE"
                 
-                # Passo 1: Encontrar todos os candidatos que contêm o termo
-                match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
+                # --- NOVA LÓGICA DE BUSCA RÍGIDA ---
+                # Passo 1: Busca básica
+                palavras_busca = termo.split()
+                mask = pd.Series([True] * len(df), index=df.index)
+                for p in palavras_busca:
+                    mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
                 
-                if not match.empty:
-                    # Passo 2: Calcular 'Score' (Pontuação) para desempate
-                    def calcular_score(nome_tabela):
-                        score = len(nome_tabela) # Nomes menores ganham
-                        # Se o usuário NÃO digitou ANGIO, mas o nome da tabela TEM ANGIO, penaliza muito
-                        if "ANGIO" not in termo and "ANGIO" in nome_tabela:
-                            score += 1000
-                        # Se o usuário DIGITOU ANGIO e o nome da tabela TEM ANGIO, ganha bônus
-                        if "ANGIO" in termo and "ANGIO" in nome_tabela:
-                            score -= 500
-                        return score
-
-                    match['score'] = match['NOME_PURIFICADO'].apply(calcular_score)
-                    res = match.sort_values('score').iloc[0]
+                resultado = df[mask].copy()
+                
+                if not resultado.empty:
+                    # Passo 2: Se o usuário NÃO digitou "ANGIO", removemos tudo que tenha "ANGIO"
+                    if "ANGIO" not in termo:
+                        resultado = resultado[~resultado['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
                     
-                    nome_tab = res.iloc[0]
-                    preco = extrair_preco(res.iloc[1], nome_tab)
-                    total += preco
-                    texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
+                    # Passo 3: Se o usuário DIGITOU "ANGIO", priorizamos quem tem "ANGIO"
+                    else:
+                        resultado = resultado[resultado['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+
+                    if not resultado.empty:
+                        # Passo 4: Se sobrar mais de um, pegamos o nome mais curto (exame base)
+                        resultado['tam'] = resultado['NOME_PURIFICADO'].str.len()
+                        res_final = resultado.sort_values('tam').iloc[0]
+                        
+                        nome_tab = res_final.iloc[0]
+                        preco = extrair_preco(res_final.iloc[1], nome_tab)
+                        total += preco
+                        texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
+                    else:
+                        texto_final += f"❌ {original}: (Não encontrado)\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
             
             texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
             st.code(texto_final)
-            st.markdown(f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold; text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
             st.error(f"Erro: {e}")
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v4.9 | Estabilidade Garantida")
+st.caption("Senhor APP v5.0 | Filtro de Exclusão Garantido")
