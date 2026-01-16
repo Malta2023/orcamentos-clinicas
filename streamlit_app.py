@@ -14,7 +14,6 @@ def purificar(t):
 
 def extrair_preco(v, n_exame):
     n = purificar(n_exame)
-    # Regra fixa para Crânio solicitada
     if "RESSONANCIA" in n and "CRANIO" in n:
         return 545.00
     try:
@@ -43,13 +42,9 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
-            df_raw = pd.read_csv(url, dtype=str).fillna("")
-            
-            # Filtro TRAB Labclinica (Mantido)
+            df = pd.read_csv(url, dtype=str).fillna("")
             if clinica == "Labclinica":
-                df = df_raw[~df_raw.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
-            else:
-                df = df_raw.copy()
+                df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
             
             df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
             
@@ -60,49 +55,40 @@ if st.button("✨ GERAR ORÇAMENTO"):
             for item in linhas:
                 original = item.strip()
                 if not original: continue
-                
                 termo = purificar(original)
                 if termo == "GLICEMIA": termo = "GLICOSE"
                 
-                # --- BUSCA BLINDADA ---
-                # Se não escreveu ANGIO, limpamos todos os exames que possuem ANGIO da busca atual
-                if "ANGIO" not in termo:
-                    df_busca = df[~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)].copy()
-                else:
-                    df_busca = df.copy()
-                
-                # Tenta exato primeiro
-                match = df_busca[df_busca['NOME_PURIFICADO'] == termo]
-                
-                if match.empty:
-                    # Busca por palavras
-                    palavras = termo.split()
-                    mask = pd.Series([True] * len(df_busca), index=df_busca.index)
-                    for p in palavras:
-                        mask &= df_busca['NOME_PURIFICADO'].str.contains(p, na=False)
-                    match = df_busca[mask]
+                # BUSCA FILTRADA
+                # Procura qualquer exame que contenha o que foi digitado
+                match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
                 
                 if not match.empty:
-                    # Pega o que tiver o nome mais curto (exame simples)
-                    match['tam'] = match['NOME_PURIFICADO'].str.len()
-                    res = match.sort_values('tam').iloc[0]
+                    # Se achou mais de um (ex: Simples e Angio)
+                    if len(match) > 1:
+                        # Se o usuário NÃO digitou "ANGIO", removemos as "ANGIOS" do resultado
+                        if "ANGIO" not in termo:
+                            match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
                     
-                    nome_tab = res.iloc[0]
-                    preco = extrair_preco(res.iloc[1], nome_tab)
-                    total += preco
-                    texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
+                    # Se ainda sobrar algo, pega o de nome mais curto (geralmente o simples)
+                    if not match.empty:
+                        match['tam'] = match['NOME_PURIFICADO'].str.len()
+                        res = match.sort_values('tam').iloc[0]
+                        nome_tab = res.iloc[0]
+                        preco = extrair_preco(res.iloc[1], nome_tab)
+                        total += preco
+                        texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
+                    else:
+                        texto_final += f"❌ {original}: (Não encontrado)\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
             
             texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
             st.code(texto_final)
-            
-            link_wa = f"https://wa.me/?text={quote(texto_final)}"
-            st.markdown(f'<a href="{link_wa}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro no sistema: {e}")
+            st.error(f"Erro: {e}")
     else:
-        st.error("Por favor, cole os exames primeiro.")
+        st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v4.5 | Filtro de Exclusão Blindado")
+st.caption("Senhor APP v4.6 | Desempate Simples/Angio")
