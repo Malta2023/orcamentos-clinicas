@@ -4,16 +4,18 @@ import re
 import unicodedata
 from urllib.parse import quote
 
-# Configuração da página
 st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
-def purificar_texto(t):
+def purificar_para_busca(t):
+    """ Remove acentos, caracteres russos, espaços e símbolos para uma busca infalível """
     if not isinstance(t, str): return ""
-    # Converte letras russas/cirílicas para latinas (H e E)
+    # Converte letras russas/cirílicas para latinas
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
-    # Remove acentos e padroniza
+    # Normaliza acentos
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
-    return t.upper().strip()
+    # REMOVE TUDO: espaços, traços, parênteses (deixa só letras e números)
+    t = re.sub(r'[^A-Z0-9]', '', t.upper())
+    return t
 
 def extrair_preco(v):
     try:
@@ -24,7 +26,6 @@ def extrair_preco(v):
     except:
         return 0.0
 
-# URLs Oficiais das Tabelas
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
@@ -44,15 +45,14 @@ if st.button("✨ GERAR ORÇAMENTO"):
         url_selecionada = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         
         try:
-            # Lendo a tabela diretamente
             df = pd.read_csv(url_selecionada, dtype=str).fillna("")
             
-            # --- BLOQUEIO DEFINITIVO DO TRAB NA LABCLINICA ---
+            # Filtro de exclusão do TRAB na Labclinica
             if clinica == "Labclinica":
-                # Remove qualquer linha que contenha TRAB ou RECEPTOR DE TSH
                 df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)]
             
-            df['BUSCA_NOME'] = df.iloc[:, 0].apply(purificar_texto)
+            # Cria a coluna de busca "blindada" (sem espaços ou símbolos)
+            df['BUSCA_LIMPA'] = df.iloc[:, 0].apply(purificar_para_busca)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
             texto_final = f"*Orçamento Saúde Dirceu {tag_clinica}*\n\n"
@@ -62,35 +62,35 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 
-                termo = purificar_texto(original)
+                # Transforma a entrada do usuário (ex: "t4 livre") em "T4LIVRE"
+                termo_busca = purificar_para_busca(original)
                 
-                # Sinônimos básicos
-                if termo == "GLICEMIA": termo = "GLICOSE"
-                if termo == "AST": termo = "TGO"
-                if termo == "ALT": termo = "TGP"
+                # Sinônimos de Glicose e Fígado
+                if termo_busca == "GLICEMIA": termo_busca = "GLICOSE"
+                if termo_busca == "AST": termo_busca = "TGO"
+                if termo_busca == "ALT": termo_busca = "TGP"
                 
-                # BUSCA POR "CONTÉM" (Flexível para T4 Livre, Hemograma e outros)
-                match = df[df['BUSCA_NOME'].str.contains(termo, na=False)]
+                # Busca por CONTÉM na coluna blindada
+                match = df[df['BUSCA_LIMPA'].str.contains(termo_busca, na=False)]
                 
                 if not match.empty:
                     res = match.iloc[0]
                     nome_tab = res.iloc[0]
                     preco = extrair_preco(res.iloc[1])
-                    
                     total += preco
                     texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
             
             texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
-            
             st.code(texto_final)
+            
             link_wa = f"https://wa.me/?text={quote(texto_final)}"
             st.markdown(f'<a href="{link_wa}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro ao carregar os dados: {e}")
+            st.error(f"Erro: {e}")
     else:
-        st.error("Por favor, cole os exames primeiro.")
+        st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v3.5 | TRAB Removido da Labclinica")
+st.caption("Senhor APP v3.6 | Busca Blindada (T4 Livre e Hemograma)")
