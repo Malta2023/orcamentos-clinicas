@@ -43,35 +43,28 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA MANUAL PARA CONFLITOS (CRANIO) ---
+                # --- 1. REGRA PARA RESSONÂNCIA (VALOR FIXO R$ 545) ---
                 if "RESSONANCIA" in termo and "ANGIO" not in termo:
-                    nome_exame = "RESSONANCIA DE CRANIO"
+                    # Se digitou apenas "RESSONANCIA", o nome retornado é apenas "RESSONANCIA"
+                    nome_exame = original.upper() 
                     preco = 545.00
-                elif "TOMOGRAFIA" in termo and "ANGIO" not in termo:
-                    nome_exame = "TOMOGRAFIA DE CRANIO"
-                    preco = 250.00 # Altere para o valor real se necessário
                 
                 # --- 2. BUSCA NORMAL PARA O RESTANTE ---
                 if not nome_exame:
                     match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
-                    
                     if not match.empty:
-                        # Se achou Angio sem o usuário pedir, remove da lista
+                        # Bloqueia Angio se não foi pedido
                         if "ANGIO" not in termo:
                             match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
                         
                         if not match.empty:
-                            # Pega o item com o nome mais curto (mais simples)
                             match['tam'] = match['NOME_PURIFICADO'].str.len()
                             res = match.sort_values('tam').iloc[0]
                             nome_exame = res.iloc[0]
-                            
-                            # Extração do preço da tabela
                             preco_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
                             nums = re.findall(r"\d+\.\d+|\d+", preco_str)
                             preco = float(nums[0]) if nums else 0.0
 
-                # --- 3. RESULTADO FINAL DA LINHA ---
                 if nome_exame:
                     total += preco
                     texto_final += f"✅ {nome_exame}: R$ {preco:.2f}\n"
