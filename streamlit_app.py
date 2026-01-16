@@ -43,17 +43,32 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA PARA RESSONÂNCIA (VALOR FIXO R$ 545) ---
-                if "RESSONANCIA" in termo and "ANGIO" not in termo:
-                    # Se digitou apenas "RESSONANCIA", o nome retornado é apenas "RESSONANCIA"
-                    nome_exame = original.upper() 
-                    preco = 545.00
+                # --- 1. REGRA DO ESPELHO PARA IMAGEM (RX, TOMO, RM, USG) ---
+                termos_img = ["RAIO X", "RX", "TOMOGRAFIA", "RESSONANCIA", "ULTRASSOM", "ULTRASSONOGRAFIA"]
                 
-                # --- 2. BUSCA NORMAL PARA O RESTANTE ---
+                if any(x in termo for x in termos_img) and "ANGIO" not in termo:
+                    nome_exame = original.upper()
+                    
+                    # Identifica qual categoria buscar para pegar o preço
+                    cat = next(x for x in termos_img if x in termo)
+                    if cat == "RX": cat = "RAIO X"
+                    
+                    # Busca preço na tabela ignorando Angio
+                    match_img = df[df['NOME_PURIFICADO'].str.contains(cat, na=False) & ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                    
+                    if not match_img.empty:
+                        if cat == "RESSONANCIA":
+                            preco = 545.00
+                        else:
+                            res = match_img.iloc[0]
+                            p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                            nums = re.findall(r"\d+\.\d+|\d+", p_str)
+                            preco = float(nums[0]) if nums else 0.0
+                
+                # --- 2. BUSCA NORMAL (LABORATÓRIO E OUTROS) ---
                 if not nome_exame:
                     match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
                     if not match.empty:
-                        # Bloqueia Angio se não foi pedido
                         if "ANGIO" not in termo:
                             match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
                         
@@ -61,8 +76,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
                             match['tam'] = match['NOME_PURIFICADO'].str.len()
                             res = match.sort_values('tam').iloc[0]
                             nome_exame = res.iloc[0]
-                            preco_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-                            nums = re.findall(r"\d+\.\d+|\d+", preco_str)
+                            p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                            nums = re.findall(r"\d+\.\d+|\d+", p_str)
                             preco = float(nums[0]) if nums else 0.0
 
                 if nome_exame:
