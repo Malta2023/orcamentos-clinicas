@@ -1,12 +1,18 @@
 import streamlit as st
 import pandas as pd
 import re
+import unicodedata
 
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
 st.set_page_config(page_title="Senhor APP", page_icon="🏥")
-st.title("🏥 Senhor APP - Versão Flexível")
+st.title("🏥 Senhor APP - Orçamentos Oficiais")
+
+def limpar_texto(texto):
+    if not isinstance(texto, str): return ""
+    texto = "".join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    return texto.upper().strip()
 
 def converter_preco(valor):
     try:
@@ -19,49 +25,47 @@ def converter_preco(valor):
 clinica = st.selectbox("Selecione a Clínica:", ["Sabry", "Labclinica"])
 exames_raw = st.text_area("Cole os exames aqui:", height=200)
 
-if st.button("GERAR ORÇAMENTO"):
+if st.button("GERAR ORÇAMENTO EM LISTA"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         df = pd.read_csv(url, dtype=str)
         
-        # Cria uma coluna de busca limpa (Maiúsculo e sem acentos básicos para facilitar)
-        df['BUSCA_NOME'] = df.iloc[:, 0].str.upper().str.strip()
+        df['NOME_ORIGINAL'] = df.iloc[:, 0]
+        df['BUSCA_LIMPA'] = df.iloc[:, 0].apply(limpar_texto)
+        df['PRECO_LIMPO'] = df.iloc[:, 1].apply(converter_preco)
         
-        linhas_digitadas = exames_raw.split('\n')
-        lista_exames = []
-        for l in linhas_digitadas:
-            # Separa exames unidos por "E", "&", "/", "+"
-            partes = re.split(r' E | & | / | \+ ', l.upper())
+        linhas = [l.strip().upper() for l in exames_raw.split('\n') if l.strip()]
+        lista_busca = []
+        for l in linhas:
+            if "TRAB" in l: continue
+            partes = re.split(r' E | & | / | \+ ', l)
             for p in partes:
-                item = p.replace("EM JEJUM", "").replace("JEJUM", "").replace("24 HORAS", "").strip()
-                if item == "GLICEMIA": item = "GLICOSE"
-                # Se for Raio X, simplifica a busca para a parte principal
-                if "RAIO X" in item:
-                    item = item.replace("RAIO X", "").strip()
-                if item: lista_exames.append(item)
+                p = p.replace("EM JEJUM", "").replace("JEJUM", "").strip()
+                
+                # REGRAS DE SINÔNIMOS
+                p_limpa = limpar_texto(p)
+                if p_limpa in ["EAS", "URINA TIPO 1", "URINA TIPO I", "EXAME DE URINA"]:
+                    p_limpa = "SUMARIO DE URINA"
+                if p_limpa == "GLICEMIA": p_limpa = "GLICOSE"
+                
+                if p_limpa: lista_busca.append(p_limpa)
 
-        texto_final = f"*Orçamento*\n*Clínica {clinica}*\n\n"
-        total_geral = 0.0
+        texto_final = f"*Orçamento*\n*Clínica {clinica}*\n\nSegue seu orçamento completo:\n\n"
+        total = 0.0
         
-        for busca in lista_exames:
-            # BUSCA INTELIGENTE: Procura o termo em qualquer parte do nome na tabela
-            resultado = df[df['BUSCA_NOME'].str.contains(busca, na=False, case=False)]
+        for termo in lista_busca:
+            # Busca flexível: o termo deve estar contido no nome da tabela
+            resultado = df[df['BUSCA_LIMPA'].str.contains(termo, na=False)]
             
             if not resultado.empty:
-                # Se achar vários (ex: vários Sódios), pega o primeiro ou o de menor preço
-                resultado = resultado.copy()
-                resultado['PRECO_NUM'] = resultado.iloc[:, 1].apply(converter_preco)
-                melhor_opcao = resultado.sort_values(by='PRECO_NUM').iloc[0]
-                
-                nome_exame = melhor_opcao.iloc[0]
-                preco_exame = melhor_opcao['PRECO_NUM']
-                
-                total_geral += preco_exame
-                texto_final += f"* ✅ {nome_exame}: R$ {preco_exame:.2f}\n"
+                # Pega o primeiro resultado (ou menor preço se houver vários)
+                melhor_opcao = resultado.sort_values(by='PRECO_LIMPO').iloc[0]
+                total += melhor_opcao['PRECO_LIMPO']
+                texto_final += f"* ✅ {melhor_opcao['NOME_ORIGINAL']}: R$ {melhor_opcao['PRECO_LIMPO']:.2f}\n"
             else:
-                texto_final += f"* ❌ {busca}: (Não encontrado)\n"
+                texto_final += f"* ❌ {termo}: (Não encontrado)\n"
         
-        texto_final += f"\n*Total: R$ {total_geral:.2f}*\n\nQuando gostaria de agendar?"
+        texto_final += f"\n*Total: R$ {total:.2f}*\n\nQuando gostaria de agendar?"
         st.code(texto_final, language="text")
     else:
-        st.error("Por favor, cole os exames!")
+        st.error("Cole a lista de exames!")
