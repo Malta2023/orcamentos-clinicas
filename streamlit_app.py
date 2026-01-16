@@ -14,6 +14,7 @@ def purificar(t):
 
 def extrair_preco(v, n_exame):
     n = purificar(n_exame)
+    # Regra de ouro para o Crânio
     if "RESSONANCIA" in n and "CRANIO" in n:
         return 545.00
     try:
@@ -56,29 +57,26 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 termo = purificar(original)
-                if termo == "GLICEMIA": termo = "GLICOSE"
                 
-                # BUSCA FILTRADA
-                # Procura qualquer exame que contenha o que foi digitado
+                # Busca básica: contém o que foi digitado
                 match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
                 
                 if not match.empty:
-                    # Se achou mais de um (ex: Simples e Angio)
-                    if len(match) > 1:
-                        # Se o usuário NÃO digitou "ANGIO", removemos as "ANGIOS" do resultado
-                        if "ANGIO" not in termo:
-                            match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                    # DESEMPATE PARA RESSONANCIA/TOMO/ANGIO
+                    if "ANGIO" not in termo:
+                        # Se o usuário NÃO digitou ANGIO, prioriza quem NÃO tem ANGIO no nome
+                        simples = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                        if not simples.empty:
+                            match = simples
                     
-                    # Se ainda sobrar algo, pega o de nome mais curto (geralmente o simples)
-                    if not match.empty:
-                        match['tam'] = match['NOME_PURIFICADO'].str.len()
-                        res = match.sort_values('tam').iloc[0]
-                        nome_tab = res.iloc[0]
-                        preco = extrair_preco(res.iloc[1], nome_tab)
-                        total += preco
-                        texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
-                    else:
-                        texto_final += f"❌ {original}: (Não encontrado)\n"
+                    # Se houver vários, pega o que tem o nome mais curto (exame básico)
+                    match['comprimento'] = match['NOME_PURIFICADO'].str.len()
+                    res = match.sort_values('comprimento').iloc[0]
+                    
+                    nome_tab = res.iloc[0]
+                    preco = extrair_preco(res.iloc[1], nome_tab)
+                    total += preco
+                    texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
             
@@ -91,4 +89,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v4.6 | Desempate Simples/Angio")
+st.caption("Senhor APP v4.7 | Busca Estabilizada")
