@@ -35,16 +35,17 @@ URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF7
 
 st.title("🏥 Senhor APP")
 
-# Botão para resetar o orçamento
 if st.button("🔄 NOVO ORÇAMENTO"):
     st.rerun()
 
 clinica = st.radio("Selecione a Clínica:", ["Sabry", "Labclinica"], horizontal=True)
 exames_raw = st.text_area("Cole os exames aqui:", placeholder="Ex: Hemograma\nHemoglobina\nGlicose", height=200)
 
+# Identificador da clínica para o título
+tag_clinica = "(S)" if clinica == "Sabry" else "(L)"
+
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
-        # Define qual URL usar (LINHA CORRIGIDA)
         url_selecionada = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         
         try:
@@ -57,7 +58,9 @@ if st.button("✨ GERAR ORÇAMENTO"):
             df['BUSCA_LIMPA'] = df.iloc[:, 0].apply(purificar_texto)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
-            texto_final = f"*🏥 Orçamento - Clínica {clinica}*\n\n"
+            
+            # Título conforme solicitado pelo usuário
+            texto_final = f"*Orçamento Saúde Dirceu {tag_clinica}*\n\n"
             total = 0.0
             
             for item in linhas:
@@ -66,15 +69,15 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 
                 p_limpa = purificar_texto(original)
                 
-                # Sinônimos e Padronização
+                # Sinônimos
                 if p_limpa == "GLICEMIA": p_limpa = "GLICOSE"
                 if p_limpa in ["AST", "TGO"]: p_limpa = "TGO"
                 if p_limpa in ["ALT", "TGP"]: p_limpa = "TGP"
 
-                # BUSCA 1: Nome Exato (Para não confundir Hemoglobina com Eletroforese)
+                # BUSCA 1: Nome Exato
                 match = df[df['BUSCA_LIMPA'] == p_limpa]
                 
-                # BUSCA 2: Aproximada (Contém o nome)
+                # BUSCA 2: Aproximada
                 if match.empty:
                     match = df[df['BUSCA_LIMPA'].str.contains(p_limpa, na=False)]
                 
@@ -85,7 +88,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     total += preco
                     texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
                 else:
-                    # Garantia para o Hemograma
+                    # Fallback Hemograma
                     if "HEMOGRAMA" in p_limpa:
                         p_h = 12.60 if clinica == "Sabry" else 12.24
                         total += p_h
@@ -104,4 +107,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Cole os exames primeiro!")
 
-st.caption("Senhor APP v3.0 | Teresina - PI")
+st.caption("Senhor APP v3.1 | Teresina - PI")
