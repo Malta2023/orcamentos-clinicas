@@ -43,29 +43,28 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA DO ESPELHO PARA IMAGEM (RX, TOMO, RM, USG) ---
-                termos_img = ["RAIO X", "RX", "TOMOGRAFIA", "RESSONANCIA", "ULTRASSOM", "ULTRASSONOGRAFIA"]
+                # --- 1. REGRA ESPECIAL: RESSONÂNCIA (SEMPRE 545,00) ---
+                if "RESSONANCIA" in termo and "ANGIO" not in termo:
+                    nome_exame = original.upper()
+                    preco = 545.00
                 
-                if any(x in termo for x in termos_img) and "ANGIO" not in termo:
+                # --- 2. REGRA DO ESPELHO PARA OUTROS EXAMES DE IMAGEM ---
+                elif any(x in termo for x in ["RAIO X", "RX", "TOMOGRAFIA", "ULTRASSOM", "ULTRASSONOGRAFIA"]) and "ANGIO" not in termo:
                     nome_exame = original.upper()
                     
-                    # Identifica qual categoria buscar para pegar o preço
-                    cat = next(x for x in termos_img if x in termo)
-                    if cat == "RX": cat = "RAIO X"
+                    # Busca o valor na tabela para a categoria
+                    cat = "RAIO X" if "RAIO X" in termo or "RX" in termo else \
+                          "TOMOGRAFIA" if "TOMOGRAFIA" in termo else \
+                          "ULTRASSOM" if "ULTRASSOM" in termo or "ULTRASSONOGRAFIA" in termo else ""
                     
-                    # Busca preço na tabela ignorando Angio
                     match_img = df[df['NOME_PURIFICADO'].str.contains(cat, na=False) & ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                    
                     if not match_img.empty:
-                        if cat == "RESSONANCIA":
-                            preco = 545.00
-                        else:
-                            res = match_img.iloc[0]
-                            p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-                            nums = re.findall(r"\d+\.\d+|\d+", p_str)
-                            preco = float(nums[0]) if nums else 0.0
-                
-                # --- 2. BUSCA NORMAL (LABORATÓRIO E OUTROS) ---
+                        res = match_img.iloc[0]
+                        p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                        nums = re.findall(r"\d+\.\d+|\d+", p_str)
+                        preco = float(nums[0]) if nums else 0.0
+
+                # --- 3. BUSCA NORMAL PARA O RESTANTE (LABORATÓRIO) ---
                 if not nome_exame:
                     match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
                     if not match.empty:
@@ -92,5 +91,3 @@ if st.button("✨ GERAR ORÇAMENTO"):
             
         except Exception as e:
             st.error(f"Erro: {e}")
-    else:
-        st.error("Cole os exames primeiro.")
