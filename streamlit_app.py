@@ -43,28 +43,30 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA ESPECIAL: RESSONÂNCIA (SEMPRE 545,00) ---
-                if "RESSONANCIA" in termo and "ANGIO" not in termo:
-                    nome_exame = original.upper()
-                    preco = 545.00
-                
-                # --- 2. REGRA DO ESPELHO PARA OUTROS EXAMES DE IMAGEM ---
-                elif any(x in termo for x in ["RAIO X", "RX", "TOMOGRAFIA", "ULTRASSOM", "ULTRASSONOGRAFIA"]) and "ANGIO" not in termo:
-                    nome_exame = original.upper()
-                    
-                    # Busca o valor na tabela para a categoria
-                    cat = "RAIO X" if "RAIO X" in termo or "RX" in termo else \
-                          "TOMOGRAFIA" if "TOMOGRAFIA" in termo else \
-                          "ULTRASSOM" if "ULTRASSOM" in termo or "ULTRASSONOGRAFIA" in termo else ""
-                    
-                    match_img = df[df['NOME_PURIFICADO'].str.contains(cat, na=False) & ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                    if not match_img.empty:
-                        res = match_img.iloc[0]
-                        p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-                        nums = re.findall(r"\d+\.\d+|\d+", p_str)
-                        preco = float(nums[0]) if nums else 0.0
+                # --- 1. REGRA DO ESPELHO (RM, TC, RX, US) ---
+                # Define as categorias e suas abreviações
+                is_rm = "RESSONANCIA" in termo or " RM " in f" {termo} " or termo.startswith("RM")
+                is_tc = "TOMOGRAFIA" in termo or " TC " in f" {termo} " or termo.startswith("TC")
+                is_rx = "RAIO X" in termo or " RX " in f" {termo} " or termo.startswith("RX")
+                is_us = "ULTRAS" in termo or " US " in f" {termo} " or termo.startswith("US")
 
-                # --- 3. BUSCA NORMAL PARA O RESTANTE (LABORATÓRIO) ---
+                if (is_rm or is_tc or is_rx or is_us) and "ANGIO" not in termo:
+                    nome_exame = original.upper() # Respeita o seu texto
+                    
+                    # Define qual termo usar para buscar o preço na tabela
+                    cat_busca = "RESSONANCIA" if is_rm else "TOMOGRAFIA" if is_tc else "RAIO X" if is_rx else "ULTRAS"
+                    
+                    if is_rm:
+                        preco = 545.00
+                    else:
+                        match_img = df[df['NOME_PURIFICADO'].str.contains(cat_busca, na=False) & ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                        if not match_img.empty:
+                            res = match_img.iloc[0]
+                            p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                            nums = re.findall(r"\d+\.\d+|\d+", p_str)
+                            preco = float(nums[0]) if nums else 0.0
+
+                # --- 2. BUSCA NORMAL (OUTROS EXAMES) ---
                 if not nome_exame:
                     match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
                     if not match.empty:
