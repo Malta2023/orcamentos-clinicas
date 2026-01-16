@@ -8,7 +8,7 @@ st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
 def purificar(t):
     if not isinstance(t, str): return ""
-    # Converte letras russas (H e E) para latinas
+    # Corrige o H e E russos/cirílicos para latinos
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
     # Remove acentos
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
@@ -41,12 +41,16 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
-            df = pd.read_csv(url, dtype=str).fillna("")
+            # Carrega a tabela
+            df_raw = pd.read_csv(url, dtype=str).fillna("")
             
-            # Bloqueio TRAB na Labclinica
+            # Filtro do TRAB (Correção do erro da imagem)
             if clinica == "Labclinica":
-                df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)]
+                df = df_raw[~df_raw.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
+            else:
+                df = df_raw.copy()
             
+            # Cria coluna de busca purificada
             df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
@@ -57,19 +61,18 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 
-                termo_usuario = purificar(original)
+                # Pre-processamento
+                termo_limpo = purificar(original)
+                if termo_limpo == "GLICEMIA": termo_limpo = "GLICOSE"
                 
-                # Sinônimos de Glicose
-                if termo_usuario == "GLICEMIA": termo_usuario = "GLICOSE"
+                # Busca por palavras-chave (Para achar T4 LIVRE de qualquer jeito)
+                palavras = termo_limpo.split()
+                if not palavras: continue
                 
-                # NOVA LÓGICA: Busca por palavras soltas
-                # Ex: "T4 LIVRE" vira as palavras ["T4", "LIVRE"]
-                palavras_chave = termo_usuario.split()
-                
-                # Filtra a tabela: a linha deve conter TODAS as palavras digitadas
-                mask = pd.Series([True] * len(df))
-                for palavra in palavras_chave:
-                    mask &= df['NOME_PURIFICADO'].str.contains(palavra, na=False)
+                # Filtro inteligente: a linha deve conter todas as palavras digitadas
+                mask = df['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
+                for p in palavras[1:]:
+                    mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
                 
                 match = df[mask]
                 
@@ -84,12 +87,13 @@ if st.button("✨ GERAR ORÇAMENTO"):
             
             texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
             st.code(texto_final)
+            
             link_wa = f"https://wa.me/?text={quote(texto_final)}"
             st.markdown(f'<a href="{link_wa}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro no sistema: {e}")
     else:
-        st.error("Cole os exames primeiro.")
+        st.error("Por favor, cole os exames primeiro.")
 
-st.caption("Senhor APP v3.7 | Busca por Palavras-Chave")
+st.caption("Senhor APP v3.8 | Busca Inteligente e Filtro Corrigido")
