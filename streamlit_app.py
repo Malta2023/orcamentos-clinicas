@@ -15,7 +15,7 @@ def purificar(t):
 def extrair_preco(v, n_exame):
     n = purificar(n_exame)
     if "RESSONANCIA" in n and "CRANIO" in n:
-        return 545.00
+        return 545.0
     try:
         if pd.isna(v) or v == "": return 0.0
         limpo = str(v).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
@@ -36,48 +36,43 @@ if st.button("🔄 NOVO ORÇAMENTO"):
 clinica = st.radio("Selecione a Clínica:", ["Sabry", "Labclinica"], horizontal=True)
 exames_raw = st.text_area("Cole os exames aqui:", height=200)
 
-tag_clinica = "(S)" if clinica == "Sabry" else "(L)"
-
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
-            df_base = pd.read_csv(url, dtype=str).fillna("")
+            df = pd.read_csv(url, dtype=str).fillna("")
             if clinica == "Labclinica":
-                df_base = df_base[~df_base.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
+                df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
             
-            df_base['NOME_PURIFICADO'] = df_base.iloc[:, 0].apply(purificar)
+            df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
-            texto_final = f"*Orçamento Saúde Dirceu {tag_clinica}*\n\n"
+            texto_final = f"*Orçamento Saúde Dirceu {'(S)' if clinica == 'Sabry' else '(L)'}*\n\n"
             total = 0.0
             
             for item in linhas:
                 original = item.strip()
                 if not original: continue
-                termo_usuario = purificar(original)
+                termo = purificar(original)
+                if termo == "GLICEMIA": termo = "GLICOSE"
                 
-                # --- A LÓGICA FINAL ---
-                # Se o usuário NÃO digitou "ANGIO", criamos uma cópia da tabela SEM nada de "ANGIO"
-                if "ANGIO" not in termo_usuario:
-                    df_trabalho = df_base[~df_base['NOME_PURIFICADO'].str.contains("ANGIO", na=False)].copy()
-                else:
-                    df_trabalho = df_base.copy()
-                
-                # Agora buscamos apenas na tabela filtrada
-                palavras = termo_usuario.split()
-                if not palavras: continue
-                
-                mask = df_trabalho['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
-                for p in palavras[1:]:
-                    mask &= df_trabalho['NOME_PURIFICADO'].str.contains(p, na=False)
-                
-                match = df_trabalho[mask]
+                # Passo 1: Encontrar todos os candidatos que contêm o termo
+                match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
                 
                 if not match.empty:
-                    # Se tiver mais de um, pega o de nome mais curto (exame simples)
-                    match['tam'] = match['NOME_PURIFICADO'].str.len()
-                    res = match.sort_values('tam').iloc[0]
+                    # Passo 2: Calcular 'Score' (Pontuação) para desempate
+                    def calcular_score(nome_tabela):
+                        score = len(nome_tabela) # Nomes menores ganham
+                        # Se o usuário NÃO digitou ANGIO, mas o nome da tabela TEM ANGIO, penaliza muito
+                        if "ANGIO" not in termo and "ANGIO" in nome_tabela:
+                            score += 1000
+                        # Se o usuário DIGITOU ANGIO e o nome da tabela TEM ANGIO, ganha bônus
+                        if "ANGIO" in termo and "ANGIO" in nome_tabela:
+                            score -= 500
+                        return score
+
+                    match['score'] = match['NOME_PURIFICADO'].apply(calcular_score)
+                    res = match.sort_values('score').iloc[0]
                     
                     nome_tab = res.iloc[0]
                     preco = extrair_preco(res.iloc[1], nome_tab)
@@ -88,11 +83,11 @@ if st.button("✨ GERAR ORÇAMENTO"):
             
             texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
             st.code(texto_final)
-            st.markdown(f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
+            st.markdown(f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold; text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
             st.error(f"Erro: {e}")
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v4.8 | Filtro de Exclusão Atômica")
+st.caption("Senhor APP v4.9 | Estabilidade Garantida")
