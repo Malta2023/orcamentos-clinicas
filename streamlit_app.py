@@ -40,28 +40,24 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 if not original: continue
                 termo = purificar(original)
                 
-                # --- FORÇA BRUTA: TRATAMENTO ESPECIAL PARA RESSONÂNCIA ---
-                if "RESSONANCIA" in termo and "ANGIO" not in termo:
-                    # Força o sistema a pegar a ressonância simples e ignorar Angio
-                    match = df[df['NOME_PURIFICADO'].str.contains("RESSONANCIA", na=False) & 
-                               ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                elif "TOMOGRAFIA" in termo and "ANGIO" not in termo:
-                    # Força o sistema a pegar tomografia simples e ignorar Angio
-                    match = df[df['NOME_PURIFICADO'].str.contains("TOMOGRAFIA", na=False) & 
-                               ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                else:
-                    # Busca normal para outros exames (Glicose, T4, etc)
-                    match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)]
+                # BUSCA SIMPLES: Acha tudo que contém o que você digitou
+                match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
                 
-                # Desempate pelo tamanho do nome (o menor nome ganha = mais simples)
                 if not match.empty:
-                    match = match.copy()
+                    # SE ACHOU MUITA COISA (Ex: Achou Ressonância e Angioressonância)
+                    if len(match) > 1:
+                        # Se você NÃO escreveu ANGIO, ele joga fora quem tem ANGIO no nome
+                        if "ANGIO" not in termo:
+                            temp_match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+                            if not temp_match.empty:
+                                match = temp_match
+                    
+                    # Pega o primeiro resultado que sobrou (o mais curto/simples)
                     match['tam'] = match['NOME_PURIFICADO'].str.len()
                     res = match.sort_values('tam').iloc[0]
-                    
                     nome_exame = res.iloc[0]
                     
-                    # Preço fixo para Crânio conforme sua orientação
+                    # Regra de Preço para Crânio
                     if "CRANIO" in purificar(nome_exame):
                         preco = 545.00
                     else:
@@ -83,4 +79,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v5.1 | Correção Final Crânio")
+st.caption("Senhor APP v5.2 | Busca Super Simples")
