@@ -12,7 +12,12 @@ def purificar(t):
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
     return t.upper().strip()
 
-def extrair_preco(v):
+def extrair_preco(v, n_exame):
+    n = purificar(n_exame)
+    # Regra de Segurança para Ressonâncias de Crânio
+    if "RESSONANCIA" in n and "CRANIO" in n:
+        return 545.00
+        
     try:
         if pd.isna(v) or v == "": return 0.0
         limpo = str(v).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
@@ -57,24 +62,38 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 if not original: continue
                 
                 termo_limpo = purificar(original)
-                if termo_limpo == "GLICEMIA": termo_limpo = "GLICOSE"
                 
-                # --- LÓGICA DE PRECISÃO ---
-                # 1. Tenta achar o nome EXATO primeiro (Evita confundir Creatinina com Clearence)
-                match = df[df['NOME_PURIFICADO'] == termo_limpo]
+                # --- LÓGICA DE DIFERENCIAÇÃO (ANGIO VS SIMPLES) ---
+                match = pd.DataFrame()
                 
-                # 2. Se não achou exato, tenta a busca por palavras-chave (Para T4 Livre, etc)
-                if match.empty:
+                if "ANGIO" in termo_limpo:
+                    # Busca específica para ANGIO
+                    match = df[df['NOME_PURIFICADO'].str.contains("ANGIO", na=False) & 
+                               df['NOME_PURIFICADO'].str.contains(termo_limpo.replace("ANGIO", "").strip(), na=False)]
+                elif "TOMOGRAFIA" in termo_limpo or "RESSONANCIA" in termo_limpo:
+                    # Busca para SIMPLES (Garante que NÃO tenha ANGIO no nome da tabela)
                     palavras = termo_limpo.split()
-                    mask = df['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
-                    for p in palavras[1:]:
+                    mask = ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)
+                    for p in palavras:
                         mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
                     match = df[mask]
+                
+                # Se não caiu nas regras acima ou não achou nada, tenta busca padrão
+                if match.empty:
+                    match = df[df['NOME_PURIFICADO'] == termo_limpo]
+                
+                if match.empty:
+                    palavras = termo_limpo.split()
+                    if palavras:
+                        mask = df['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
+                        for p in palavras[1:]:
+                            mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
+                        match = df[mask]
                 
                 if not match.empty:
                     res = match.iloc[0]
                     nome_tab = res.iloc[0]
-                    preco = extrair_preco(res.iloc[1])
+                    preco = extrair_preco(res.iloc[1], nome_tab)
                     total += preco
                     texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
                 else:
@@ -91,4 +110,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Por favor, cole os exames primeiro.")
 
-st.caption("Senhor APP v3.9 | Precisão de Creatinina e T4 Livre")
+st.caption("Senhor APP v4.1 | Diferenciação Angio/Simples Ativada")
