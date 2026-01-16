@@ -9,17 +9,17 @@ URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF7
 st.set_page_config(page_title="Senhor APP - Orçamentos", page_icon="🏥")
 st.title("🏥 Simulador de Orçamentos")
 
-clinica = st.selectbox("Selecione a Clínica:", ["Sabry", "Labclinica"])
-exames_raw = st.text_area("Cole os exames aqui (um por linha):", height=200)
-
 def limpar_preco(valor):
     if pd.isna(valor): return 0.0
-    # Remove R$, espaços e troca vírgula por ponto
-    limpo = re.sub(r'[^\d,.-]', '', str(valor)).replace(',', '.')
+    # Remove R$, pontos de milhar e troca vírgula por ponto decimal
+    limpo = str(valor).replace('R$', '').replace('.', '').replace(',', '.').strip()
     try:
         return float(limpo)
     except:
         return 0.0
+
+clinica = st.selectbox("Selecione a Clínica:", ["Sabry", "Labclinica"])
+exames_raw = st.text_area("Cole os exames aqui (um por linha):", height=200)
 
 if st.button("Gerar Orçamento para WhatsApp"):
     if exames_raw:
@@ -27,7 +27,7 @@ if st.button("Gerar Orçamento para WhatsApp"):
         df = pd.read_csv(url)
         
         lista_pedida = [e.strip().upper() for e in exames_raw.split('\n') if e.strip()]
-        texto_whats = f"*Orçamento*\n*Clínica {clinica}*\n\nSegue seu orçamento completo:\n"
+        texto_whats = f"*Orçamento*\n*Clínica {clinica}*\n\nSegue seu orçamento completo:\n\n"
         total = 0.0
         
         for item in lista_pedida:
@@ -36,14 +36,14 @@ if st.button("Gerar Orçamento para WhatsApp"):
                 nome_tab = match.iloc[0, 0]
                 preco = limpar_preco(match.iloc[0, 1])
                 total += preco
-                texto_whats += f"{nome_tab} — R$ {preco:.2f}\n"
+                texto_whats += f"✅ {nome_tab} — R$ {preco:.2f}\n"
             else:
-                texto_whats += f"{item} — (Consultar valor)\n"
+                texto_whats += f"❌ {item} — (Não encontrado)\n"
         
         texto_whats += f"\n*Total: R$ {total:.2f}*\n\nQuando gostaria de agendar?"
         
         st.subheader("Texto pronto para copiar:")
         st.code(texto_whats, language="text")
-        st.info("Dica: Copie o texto acima e cole direto no WhatsApp do cliente!")
+        st.success("Tudo pronto! É só copiar o texto acima.")
     else:
-        st.error("Por favor, cole os exames.")
+        st.error("Por favor, cole a lista de exames.")
