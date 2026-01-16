@@ -14,7 +14,6 @@ def purificar(t):
 
 def extrair_preco(v, n_exame):
     n = purificar(n_exame)
-    # Regra de ouro para o Crânio
     if "RESSONANCIA" in n and "CRANIO" in n:
         return 545.00
     try:
@@ -43,11 +42,11 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
-            df = pd.read_csv(url, dtype=str).fillna("")
+            df_base = pd.read_csv(url, dtype=str).fillna("")
             if clinica == "Labclinica":
-                df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
+                df_base = df_base[~df_base.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
             
-            df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
+            df_base['NOME_PURIFICADO'] = df_base.iloc[:, 0].apply(purificar)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
             texto_final = f"*Orçamento Saúde Dirceu {tag_clinica}*\n\n"
@@ -56,22 +55,29 @@ if st.button("✨ GERAR ORÇAMENTO"):
             for item in linhas:
                 original = item.strip()
                 if not original: continue
-                termo = purificar(original)
+                termo_usuario = purificar(original)
                 
-                # Busca básica: contém o que foi digitado
-                match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
+                # --- A LÓGICA FINAL ---
+                # Se o usuário NÃO digitou "ANGIO", criamos uma cópia da tabela SEM nada de "ANGIO"
+                if "ANGIO" not in termo_usuario:
+                    df_trabalho = df_base[~df_base['NOME_PURIFICADO'].str.contains("ANGIO", na=False)].copy()
+                else:
+                    df_trabalho = df_base.copy()
+                
+                # Agora buscamos apenas na tabela filtrada
+                palavras = termo_usuario.split()
+                if not palavras: continue
+                
+                mask = df_trabalho['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
+                for p in palavras[1:]:
+                    mask &= df_trabalho['NOME_PURIFICADO'].str.contains(p, na=False)
+                
+                match = df_trabalho[mask]
                 
                 if not match.empty:
-                    # DESEMPATE PARA RESSONANCIA/TOMO/ANGIO
-                    if "ANGIO" not in termo:
-                        # Se o usuário NÃO digitou ANGIO, prioriza quem NÃO tem ANGIO no nome
-                        simples = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                        if not simples.empty:
-                            match = simples
-                    
-                    # Se houver vários, pega o que tem o nome mais curto (exame básico)
-                    match['comprimento'] = match['NOME_PURIFICADO'].str.len()
-                    res = match.sort_values('comprimento').iloc[0]
+                    # Se tiver mais de um, pega o de nome mais curto (exame simples)
+                    match['tam'] = match['NOME_PURIFICADO'].str.len()
+                    res = match.sort_values('tam').iloc[0]
                     
                     nome_tab = res.iloc[0]
                     preco = extrair_preco(res.iloc[1], nome_tab)
@@ -89,4 +95,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v4.7 | Busca Estabilizada")
+st.caption("Senhor APP v4.8 | Filtro de Exclusão Atômica")
