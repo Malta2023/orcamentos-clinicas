@@ -8,14 +8,13 @@ st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
 def purificar(t):
     if not isinstance(t, str): return ""
-    # Corrige caracteres cirílicos e remove acentos
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
     return t.upper().strip()
 
 def extrair_preco(v, n_exame):
     n = purificar(n_exame)
-    # Regra de Segurança: Ressonância de Crânio sempre 545.00
+    # Regra fixa para Crânio solicitada
     if "RESSONANCIA" in n and "CRANIO" in n:
         return 545.00
     try:
@@ -44,10 +43,9 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
-            # Carregamento e limpeza inicial
             df_raw = pd.read_csv(url, dtype=str).fillna("")
             
-            # Filtro TRAB para Labclinica
+            # Filtro TRAB Labclinica (Mantido)
             if clinica == "Labclinica":
                 df = df_raw[~df_raw.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
             else:
@@ -63,41 +61,32 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 
-                termo_usuario = purificar(original)
-                if termo_usuario == "GLICEMIA": termo_usuario = "GLICOSE"
+                termo = purificar(original)
+                if termo == "GLICEMIA": termo = "GLICOSE"
                 
-                # --- LÓGICA DE FILTRAGEM REFORÇADA ---
-                match = pd.DataFrame()
-                
-                if "ANGIO" in termo_usuario:
-                    # Caso 1: Usuário QUER Angio
-                    # Procura linhas que contenham ANGIO
-                    match = df[df['NOME_PURIFICADO'].str.contains("ANGIO", na=False) & 
-                               df['NOME_PURIFICADO'].str.contains(termo_usuario.replace("ANGIO", "").strip(), na=False)]
+                # --- BUSCA BLINDADA ---
+                # Se não escreveu ANGIO, limpamos todos os exames que possuem ANGIO da busca atual
+                if "ANGIO" not in termo:
+                    df_busca = df[~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)].copy()
                 else:
-                    # Caso 2: Usuário NÃO quer Angio (Busca Simples)
-                    # Primeiro tenta correspondência EXATA (ex: "RESSONANCIA DE CRANIO")
-                    match = df[df['NOME_PURIFICADO'] == termo_usuario]
-                    
-                    if match.empty:
-                        # Se não for exato, busca por palavras mas BLOQUEIA qualquer linha que tenha "ANGIO"
-                        palavras = termo_usuario.split()
-                        mask = ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)
-                        for p in palavras:
-                            mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
-                        match = df[mask]
+                    df_busca = df.copy()
                 
-                # Busca de última instância (se tudo falhar e não houver conflito de Angio)
+                # Tenta exato primeiro
+                match = df_busca[df_busca['NOME_PURIFICADO'] == termo]
+                
                 if match.empty:
-                    palavras = termo_usuario.split()
-                    mask = pd.Series([True] * len(df), index=df.index)
+                    # Busca por palavras
+                    palavras = termo.split()
+                    mask = pd.Series([True] * len(df_busca), index=df_busca.index)
                     for p in palavras:
-                        mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
-                    match = df[mask]
-
+                        mask &= df_busca['NOME_PURIFICADO'].str.contains(p, na=False)
+                    match = df_busca[mask]
+                
                 if not match.empty:
-                    # Seleciona o item mais curto da lista para evitar pegar nomes compostos errados
-                    res = match.loc[match['NOME_PURIFICADO'].str.len().idxmin()]
+                    # Pega o que tiver o nome mais curto (exame simples)
+                    match['tam'] = match['NOME_PURIFICADO'].str.len()
+                    res = match.sort_values('tam').iloc[0]
+                    
                     nome_tab = res.iloc[0]
                     preco = extrair_preco(res.iloc[1], nome_tab)
                     total += preco
@@ -116,4 +105,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Por favor, cole os exames primeiro.")
 
-st.caption("Senhor APP v4.4 | Filtro Rígido de Exames Simples")
+st.caption("Senhor APP v4.5 | Filtro de Exclusão Blindado")
