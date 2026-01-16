@@ -9,22 +9,22 @@ st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
 def purificar_texto(t):
     if not isinstance(t, str): return ""
-    # Mata caracteres russos e limpa espaços
+    # Converte letras russas/cirílicas para latinas (H e E)
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
+    # Remove acentos e padroniza
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
     return t.upper().strip()
 
 def extrair_preco(v):
     try:
         if pd.isna(v) or v == "": return 0.0
-        # Remove R$, espaços e ajusta separadores decimais
         limpo = str(v).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
         nums = re.findall(r"\d+\.\d+|\d+", limpo)
         return float(nums[0]) if nums else 0.0
     except:
         return 0.0
 
-# URLs Oficiais
+# URLs Oficiais das Tabelas
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
@@ -44,10 +44,14 @@ if st.button("✨ GERAR ORÇAMENTO"):
         url_selecionada = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         
         try:
-            # Lendo a tabela sem cache para garantir valores novos
+            # Lendo a tabela diretamente
             df = pd.read_csv(url_selecionada, dtype=str).fillna("")
             
-            # Limpeza preventiva da tabela
+            # --- BLOQUEIO DEFINITIVO DO TRAB NA LABCLINICA ---
+            if clinica == "Labclinica":
+                # Remove qualquer linha que contenha TRAB ou RECEPTOR DE TSH
+                df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)]
+            
             df['BUSCA_NOME'] = df.iloc[:, 0].apply(purificar_texto)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
@@ -58,29 +62,23 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 
-                # Pre-processamento do termo de busca
                 termo = purificar_texto(original)
                 
-                # Sinônimos Inteligentes
+                # Sinônimos básicos
                 if termo == "GLICEMIA": termo = "GLICOSE"
-                if "T4" in termo and "LIVRE" in termo: termo = "T4" # Busca simplificada para T4
+                if termo == "AST": termo = "TGO"
+                if termo == "ALT": termo = "TGP"
                 
-                # BUSCA: Tenta encontrar qualquer item que CONTÉM o que foi digitado
-                # Isso resolve o problema de nomes técnicos longos
+                # BUSCA POR "CONTÉM" (Flexível para T4 Livre, Hemograma e outros)
                 match = df[df['BUSCA_NOME'].str.contains(termo, na=False)]
                 
-                # Se ainda não achou e for T4, tenta por TIROXINA
-                if match.empty and "T4" in termo:
-                    match = df[df['BUSCA_NOME'].str.contains("TIROXINA", na=False)]
-
                 if not match.empty:
-                    # Se houver mais de um resultado, pega o primeiro que melhor se encaixa
                     res = match.iloc[0]
-                    nome_exame_tab = res.iloc[0]
+                    nome_tab = res.iloc[0]
                     preco = extrair_preco(res.iloc[1])
                     
                     total += preco
-                    texto_final += f"✅ {nome_exame_tab}: R$ {preco:.2f}\n"
+                    texto_final += f"✅ {nome_tab}: R$ {preco:.2f}\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
             
@@ -91,8 +89,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
             st.markdown(f'<a href="{link_wa}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro ao ler planilha: {e}")
+            st.error(f"Erro ao carregar os dados: {e}")
     else:
-        st.error("Cole os exames primeiro.")
+        st.error("Por favor, cole os exames primeiro.")
 
-st.caption("Senhor APP v3.3 | Busca Flexível Ativada")
+st.caption("Senhor APP v3.5 | TRAB Removido da Labclinica")
