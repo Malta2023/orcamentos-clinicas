@@ -43,22 +43,22 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA DO ESPELHO (RM, TC, RX, US) ---
-                # Define as categorias e suas abreviações
+                # --- 1. REGRA DO ESPELHO COM VALORES FIXOS (RM, TC, RX, US) ---
                 is_rm = "RESSONANCIA" in termo or " RM " in f" {termo} " or termo.startswith("RM")
                 is_tc = "TOMOGRAFIA" in termo or " TC " in f" {termo} " or termo.startswith("TC")
                 is_rx = "RAIO X" in termo or " RX " in f" {termo} " or termo.startswith("RX")
                 is_us = "ULTRAS" in termo or " US " in f" {termo} " or termo.startswith("US")
 
                 if (is_rm or is_tc or is_rx or is_us) and "ANGIO" not in termo:
-                    nome_exame = original.upper() # Respeita o seu texto
-                    
-                    # Define qual termo usar para buscar o preço na tabela
-                    cat_busca = "RESSONANCIA" if is_rm else "TOMOGRAFIA" if is_tc else "RAIO X" if is_rx else "ULTRAS"
+                    nome_exame = original.upper()
                     
                     if is_rm:
                         preco = 545.00
+                    elif is_tc:
+                        preco = 165.00 # VALOR FIXO TC
                     else:
+                        # Para RX e US, busca na tabela
+                        cat_busca = "RAIO X" if is_rx else "ULTRAS"
                         match_img = df[df['NOME_PURIFICADO'].str.contains(cat_busca, na=False) & ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
                         if not match_img.empty:
                             res = match_img.iloc[0]
