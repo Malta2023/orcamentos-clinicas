@@ -4,54 +4,29 @@ import re
 import unicodedata
 from urllib.parse import quote
 
-# Configuração da página
-st.set_page_config(page_title="Senhor APP - Orçamentos", page_icon="🏥", layout="centered")
+st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
-# Estilo Visual
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    div.stButton > button { border-radius: 8px; font-weight: bold; transition: 0.3s; }
-    .stButton > button:first-child { background-color: #007bff; color: white; width: 100%; height: 3.5em; }
-    .whatsapp-button {
-        display: block; background-color: #25D366; color: white; padding: 15px;
-        text-align: center; text-decoration: none; font-size: 18px; font-weight: bold;
-        border-radius: 10px; margin-top: 15px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
-
-def normalizar_extremo(texto):
-    """ Remove caracteres 'fantasmas' de outros alfabetos e limpa o texto """
+def limpeza_total(texto):
+    """ Remove acentos, caracteres invisíveis, espaços duplos e letras de outros alfabetos """
     if not isinstance(texto, str): return ""
-    
-    # Mapa de caracteres que parecem latinos mas são cirílicos/outros
-    # Resolve problemas com: H, E, M, O, A, P, C, T, B, X, K, y
-    mapa_sujo = {
-        'Н': 'H', 'Е': 'E', 'М': 'M', 'О': 'O', 'А': 'A', 'Р': 'P', 
-        'С': 'C', 'Т': 'T', 'В': 'B', 'Х': 'X', 'К': 'K', 'у': 'Y'
-    }
-    for errado, certo in mapa_sujo.items():
+    # Converte letras parecidas (cirílico para latino)
+    mapa = {'Н': 'H', 'Е': 'E', 'М': 'M', 'О': 'O', 'А': 'A', 'Р': 'P', 'С': 'C', 'Т': 'T', 'В': 'B', 'Х': 'X', 'К': 'K'}
+    for errado, certo in mapa.items():
         texto = texto.replace(errado, certo)
-    
-    # Normalização padrão (remove acentos e coloca em maiúsculo)
+    # Remove acentos
     texto = "".join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
-    return texto.upper().strip()
+    # Mantém APENAS letras e números (remove espaços invisíveis, tabs, etc)
+    texto = re.sub(r'[^A-Z0-9]', '', texto.upper())
+    return texto
 
-def tratar_preco(valor, nome_exame="", clinica_escolhida=""):
-    n = normalizar_extremo(nome_exame)
-    
-    # Travas de Segurança para itens críticos
-    if "HEMOGRAMA" in n: return 12.60 if clinica_escolhida == "Sabry" else 12.24
+def extrair_valor(v, nome_exame="", clinica_ref=""):
+    n = limpeza_total(nome_exame)
+    # Valores fixos de segurança
+    if "HEMOGRAMA" in n: return 12.60 if clinica_ref == "Sabry" else 12.24
     if "MAPA" in n: return 140.00
     if "PANORAMICO" in n and "COLUNA" in n: return 154.00
-    
     try:
-        if pd.isna(valor): return 0.0
-        limpo = str(valor).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
+        limpo = str(v).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
         nums = re.findall(r"\d+\.\d+|\d+", limpo)
         return float(nums[0]) if nums else 0.0
     except: return 0.0
@@ -61,57 +36,49 @@ st.title("🏥 Senhor APP")
 if st.button("🔄 NOVO ORÇAMENTO"):
     st.rerun()
 
-clinica = st.radio("Selecione a Clínica:", ["Sabry", "Labclinica"], horizontal=True)
-exames_raw = st.text_area("Cole os exames aqui:", placeholder="Ex: Hemograma\nGlicemia\nMAPA", height=200)
+clinica = st.radio("Clínica:", ["Sabry", "Labclinica"], horizontal=True)
+exames_raw = st.text_area("Exames:", height=150)
 
-if st.button("✨ GERAR ORÇAMENTO"):
+if st.button("✨ GERAR"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         df = pd.read_csv(url, dtype=str).fillna("")
         
-        # Blindagem nas colunas e nos dados da tabela
-        df.columns = [normalizar_extremo(c) for c in df.columns]
-        df['NOME_BUSCA'] = df.iloc[:, 0].apply(normalizar_extremo)
+        # Cria coluna de busca "limpa de verdade"
+        df['BUSCA_PURIFICADA'] = df.iloc[:, 0].apply(limpeza_total)
         
         linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
-        texto_final = f"*🏥 Orçamento - Clínica {clinica}*\n\n"
+        texto_whats = f"*🏥 Orçamento - {clinica}*\n\n"
         total = 0.0
         
         for item in linhas:
             if not item.strip(): continue
             
-            # Normaliza a entrada do usuário
-            p = normalizar_extremo(item)
+            # Padronização de nomes comuns antes da limpeza total
+            p_original = item.strip().upper()
+            p_tratado = p_original.replace("GLICEMIA", "GLICOSE").replace("RX", "RX").replace("RAIO X", "RX")
             
-            # Padronização de nomes comuns
-            p = p.replace("RAIO X", "RX").replace("RX", "RX")
-            p = p.replace("GLICEMIA", "GLICOSE")
-            p = p.replace("AST", "TGO").replace("ALT", "TGP")
+            # Limpeza radical
+            termo_limpo = limpeza_total(p_tratado)
             
-            # Busca na tabela blindada
-            match = df[df['NOME_BUSCA'].str.contains(p, na=False)]
+            # Busca
+            match = df[df['BUSCA_PURIFICADA'].str.contains(termo_limpo, na=False)]
             
             if not match.empty:
                 res = match.iloc[0]
-                nome_exame_tab = res.iloc[0]
-                preco = tratar_preco(res.iloc[1], nome_exame_tab, clinica)
+                nome_exame = res.iloc[0]
+                preco = extrair_valor(res.iloc[1], nome_exame, clinica)
                 total += preco
-                texto_final += f"✅ {nome_exame_tab}: R$ {preco:.2f}\n"
+                texto_whats += f"✅ {nome_exame}: R$ {preco:.2f}\n"
             else:
-                # Fallback para Hemograma caso a busca ainda falhe por caractere especial
-                if "HEMOGRAMA" in p:
-                    p_fixo = 12.60 if clinica == "Sabry" else 12.24
-                    total += p_fixo
-                    texto_final += f"✅ HEMOGRAMA: R$ {p_fixo:.2f}\n"
+                # O "ÚLTIMO SUSPIRO" para o Hemograma
+                if "HEMOGRAMA" in termo_limpo:
+                    p_h = 12.60 if clinica == "Sabry" else 12.24
+                    total += p_h
+                    texto_whats += f"✅ HEMOGRAMA: R$ {p_h:.2f}\n"
                 else:
-                    texto_final += f"❌ {item.strip()}: (Não encontrado)\n"
+                    texto_whats += f"❌ {p_original}: (Não encontrado)\n"
         
-        texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
-        
-        st.code(texto_final, language="text")
-        link_wa = f"https://wa.me/?text={quote(texto_final)}"
-        st.markdown(f'<a href="{link_wa}" target="_blank" class="whatsapp-button">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
-    else:
-        st.error("Por favor, cole os exames!")
-
-st.caption("Senhor APP v2.6 | Blindagem Anti-Erros de Caractere")
+        texto_whats += f"\n*💰 Total: R$ {total:.2f}*\n\n*Agendar?*"
+        st.code(texto_whats)
+        st.markdown(f'<a href="https://wa.me/?text={quote(texto_whats)}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
