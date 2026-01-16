@@ -8,9 +8,7 @@ st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
 def purificar(t):
     if not isinstance(t, str): return ""
-    # Corrige o H e E russos/cirílicos para latinos
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
-    # Remove acentos
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
     return t.upper().strip()
 
@@ -41,16 +39,13 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
-            # Carrega a tabela
             df_raw = pd.read_csv(url, dtype=str).fillna("")
             
-            # Filtro do TRAB (Correção do erro da imagem)
             if clinica == "Labclinica":
                 df = df_raw[~df_raw.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)].copy()
             else:
                 df = df_raw.copy()
             
-            # Cria coluna de busca purificada
             df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
@@ -61,20 +56,20 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 
-                # Pre-processamento
                 termo_limpo = purificar(original)
                 if termo_limpo == "GLICEMIA": termo_limpo = "GLICOSE"
                 
-                # Busca por palavras-chave (Para achar T4 LIVRE de qualquer jeito)
-                palavras = termo_limpo.split()
-                if not palavras: continue
+                # --- LÓGICA DE PRECISÃO ---
+                # 1. Tenta achar o nome EXATO primeiro (Evita confundir Creatinina com Clearence)
+                match = df[df['NOME_PURIFICADO'] == termo_limpo]
                 
-                # Filtro inteligente: a linha deve conter todas as palavras digitadas
-                mask = df['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
-                for p in palavras[1:]:
-                    mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
-                
-                match = df[mask]
+                # 2. Se não achou exato, tenta a busca por palavras-chave (Para T4 Livre, etc)
+                if match.empty:
+                    palavras = termo_limpo.split()
+                    mask = df['NOME_PURIFICADO'].str.contains(palavras[0], na=False)
+                    for p in palavras[1:]:
+                        mask &= df['NOME_PURIFICADO'].str.contains(p, na=False)
+                    match = df[mask]
                 
                 if not match.empty:
                     res = match.iloc[0]
@@ -96,4 +91,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Por favor, cole os exames primeiro.")
 
-st.caption("Senhor APP v3.8 | Busca Inteligente e Filtro Corrigido")
+st.caption("Senhor APP v3.9 | Precisão de Creatinina e T4 Livre")
