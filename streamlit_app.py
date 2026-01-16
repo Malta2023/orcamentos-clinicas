@@ -8,6 +8,7 @@ st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
 def purificar(t):
     if not isinstance(t, str): return ""
+    # Corrige caracteres e remove acentos
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
     return t.upper().strip()
@@ -38,35 +39,35 @@ if st.button("✨ GERAR ORÇAMENTO"):
             for item in linhas:
                 original = item.strip()
                 if not original: continue
-                termo = purificar(original)
+                termo_usuario = purificar(original)
                 
-                # BUSCA SIMPLES: Acha tudo que contém o que você digitou
-                match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
+                # BUSCA INICIAL: Encontra tudo que contém o termo
+                match = df[df['NOME_PURIFICADO'].str.contains(termo_usuario, na=False)].copy()
                 
                 if not match.empty:
-                    # SE ACHOU MUITA COISA (Ex: Achou Ressonância e Angioressonância)
-                    if len(match) > 1:
-                        # Se você NÃO escreveu ANGIO, ele joga fora quem tem ANGIO no nome
-                        if "ANGIO" not in termo:
-                            temp_match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                            if not temp_match.empty:
-                                match = temp_match
+                    # REGRA DE OURO: Se o usuário NÃO escreveu "ANGIO", removemos tudo que tem "ANGIO"
+                    if "ANGIO" not in termo_usuario:
+                        # Criamos um filtro que só aceita o que NÃO tem a palavra ANGIO
+                        match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
                     
-                    # Pega o primeiro resultado que sobrou (o mais curto/simples)
-                    match['tam'] = match['NOME_PURIFICADO'].str.len()
-                    res = match.sort_values('tam').iloc[0]
-                    nome_exame = res.iloc[0]
-                    
-                    # Regra de Preço para Crânio
-                    if "CRANIO" in purificar(nome_exame):
-                        preco = 545.00
-                    else:
-                        preco_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-                        nums = re.findall(r"\d+\.\d+|\d+", preco_str)
-                        preco = float(nums[0]) if nums else 0.0
+                    # Se após o filtro ainda houver resultados, pegamos o de nome mais curto (exame simples)
+                    if not match.empty:
+                        match['tam'] = match['NOME_PURIFICADO'].str.len()
+                        res = match.sort_values('tam').iloc[0]
+                        nome_exame = res.iloc[0]
                         
-                    total += preco
-                    texto_final += f"✅ {nome_exame}: R$ {preco:.2f}\n"
+                        # Preço fixo para Crânio
+                        if "CRANIO" in purificar(nome_exame):
+                            preco = 545.00
+                        else:
+                            preco_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                            nums = re.findall(r"\d+\.\d+|\d+", preco_str)
+                            preco = float(nums[0]) if nums else 0.0
+                            
+                        total += preco
+                        texto_final += f"✅ {nome_exame}: R$ {preco:.2f}\n"
+                    else:
+                        texto_final += f"❌ {original}: (Não encontrado sem Angio)\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
             
@@ -79,4 +80,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v5.2 | Busca Super Simples")
+st.caption("Senhor APP v5.3 | Filtro de Exclusão de Angio")
