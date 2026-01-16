@@ -6,16 +6,13 @@ from urllib.parse import quote
 
 st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
-def purificar_para_busca(t):
-    """ Remove acentos, caracteres russos, espaços e símbolos para uma busca infalível """
+def purificar(t):
     if not isinstance(t, str): return ""
-    # Converte letras russas/cirílicas para latinas
+    # Converte letras russas (H e E) para latinas
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
-    # Normaliza acentos
+    # Remove acentos
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
-    # REMOVE TUDO: espaços, traços, parênteses (deixa só letras e números)
-    t = re.sub(r'[^A-Z0-9]', '', t.upper())
-    return t
+    return t.upper().strip()
 
 def extrair_preco(v):
     try:
@@ -42,17 +39,15 @@ tag_clinica = "(S)" if clinica == "Sabry" else "(L)"
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
-        url_selecionada = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
-        
+        url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
         try:
-            df = pd.read_csv(url_selecionada, dtype=str).fillna("")
+            df = pd.read_csv(url, dtype=str).fillna("")
             
-            # Filtro de exclusão do TRAB na Labclinica
+            # Bloqueio TRAB na Labclinica
             if clinica == "Labclinica":
                 df = df[~df.iloc[:, 0].str.contains("TRAB|RECEPTOR DE TSH", case=False, na=False)]
             
-            # Cria a coluna de busca "blindada" (sem espaços ou símbolos)
-            df['BUSCA_LIMPA'] = df.iloc[:, 0].apply(purificar_para_busca)
+            df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
             
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
             texto_final = f"*Orçamento Saúde Dirceu {tag_clinica}*\n\n"
@@ -62,16 +57,21 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = item.strip()
                 if not original: continue
                 
-                # Transforma a entrada do usuário (ex: "t4 livre") em "T4LIVRE"
-                termo_busca = purificar_para_busca(original)
+                termo_usuario = purificar(original)
                 
-                # Sinônimos de Glicose e Fígado
-                if termo_busca == "GLICEMIA": termo_busca = "GLICOSE"
-                if termo_busca == "AST": termo_busca = "TGO"
-                if termo_busca == "ALT": termo_busca = "TGP"
+                # Sinônimos de Glicose
+                if termo_usuario == "GLICEMIA": termo_usuario = "GLICOSE"
                 
-                # Busca por CONTÉM na coluna blindada
-                match = df[df['BUSCA_LIMPA'].str.contains(termo_busca, na=False)]
+                # NOVA LÓGICA: Busca por palavras soltas
+                # Ex: "T4 LIVRE" vira as palavras ["T4", "LIVRE"]
+                palavras_chave = termo_usuario.split()
+                
+                # Filtra a tabela: a linha deve conter TODAS as palavras digitadas
+                mask = pd.Series([True] * len(df))
+                for palavra in palavras_chave:
+                    mask &= df['NOME_PURIFICADO'].str.contains(palavra, na=False)
+                
+                match = df[mask]
                 
                 if not match.empty:
                     res = match.iloc[0]
@@ -84,7 +84,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
             
             texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
             st.code(texto_final)
-            
             link_wa = f"https://wa.me/?text={quote(texto_final)}"
             st.markdown(f'<a href="{link_wa}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
@@ -93,4 +92,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.error("Cole os exames primeiro.")
 
-st.caption("Senhor APP v3.6 | Busca Blindada (T4 Livre e Hemograma)")
+st.caption("Senhor APP v3.7 | Busca por Palavras-Chave")
