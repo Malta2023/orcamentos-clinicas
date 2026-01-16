@@ -7,10 +7,26 @@ from urllib.parse import quote
 st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
 def purificar(t):
-    if not isinstance(t, str): return ""
+    if not isinstance(t, str):
+        return ""
     t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
     t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
     return t.upper().strip()
+
+def buscar_exame(df, termo):
+    palavras = [p for p in termo.split() if len(p) > 3]
+    if not palavras:
+        return None
+
+    df_temp = df.copy()
+    for p in palavras:
+        df_temp = df_temp[df_temp['NOME_PURIFICADO'].str.contains(p, na=False, regex=False)]
+
+    if df_temp.empty:
+        return None
+
+    df_temp['tam'] = df_temp['NOME_PURIFICADO'].str.len()
+    return df_temp.sort_values('tam').iloc[0]
 
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
@@ -27,69 +43,60 @@ exames_raw = st.text_area("Cole os exames aqui:", height=200)
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
+
         try:
             df = pd.read_csv(url, dtype=str).fillna("")
             df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
-            
+
             linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
+
             texto_final = f"*Orçamento Saúde Dirceu {'(S)' if clinica == 'Sabry' else '(L)'}*\n\n"
             total = 0.0
-            
+
             for item in linhas:
                 original = item.strip()
-                if not original: continue
+                if not original:
+                    continue
+
                 termo = purificar(original)
-                
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA DO ESPELHO COM VALORES FIXOS (RM, TC, RX, US) ---
-                is_rm = "RESSONANCIA" in termo or " RM " in f" {termo} " or termo.startswith("RM")
-                is_tc = "TOMOGRAFIA" in termo or " TC " in f" {termo} " or termo.startswith("TC")
-                is_rx = "RAIO X" in termo or " RX " in f" {termo} " or termo.startswith("RX")
-                is_us = "ULTRAS" in termo or " US " in f" {termo} " or termo.startswith("US")
-
-                if (is_rm or is_tc or is_rx or is_us) and "ANGIO" not in termo:
+                # REGRA ESPELHO RM / TC
+                if termo.startswith("RM"):
                     nome_exame = original.upper()
-                    
-                    if is_rm:
-                        preco = 545.00
-                    elif is_tc:
-                        preco = 165.00 # VALOR FIXO TC
-                    else:
-                        # Para RX e US, busca na tabela
-                        cat_busca = "RAIO X" if is_rx else "ULTRAS"
-                        match_img = df[df['NOME_PURIFICADO'].str.contains(cat_busca, na=False) & ~df['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                        if not match_img.empty:
-                            res = match_img.iloc[0]
-                            p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-                            nums = re.findall(r"\d+\.\d+|\d+", p_str)
-                            preco = float(nums[0]) if nums else 0.0
+                    preco = 545.00
 
-                # --- 2. BUSCA NORMAL (OUTROS EXAMES) ---
-                if not nome_exame:
-                    match = df[df['NOME_PURIFICADO'].str.contains(termo, na=False)].copy()
-                    if not match.empty:
-                        if "ANGIO" not in termo:
-                            match = match[~match['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
-                        
-                        if not match.empty:
-                            match['tam'] = match['NOME_PURIFICADO'].str.len()
-                            res = match.sort_values('tam').iloc[0]
-                            nome_exame = res.iloc[0]
-                            p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-                            nums = re.findall(r"\d+\.\d+|\d+", p_str)
-                            preco = float(nums[0]) if nums else 0.0
+                elif termo.startswith("TC"):
+                    nome_exame = original.upper()
+                    preco = 165.00
+
+                else:
+                    res = buscar_exame(df, termo)
+
+                    if res is not None:
+                        nome_exame = res.iloc[0]
+                        p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                        nums = re.findall(r"\d+\.\d+|\d+", p_str)
+                        preco = float(nums[0]) if nums else 0.0
 
                 if nome_exame:
                     total += preco
                     texto_final += f"✅ {nome_exame}: R$ {preco:.2f}\n"
                 else:
                     texto_final += f"❌ {original}: (Não encontrado)\n"
-            
+
             texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
+
             st.code(texto_final)
-            st.markdown(f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" style="background-color:#25D366; color:white; padding:15px; border-radius:10px; display:block; text-align:center; text-decoration:none; font-weight:bold;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
-            
+            st.markdown(
+                f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" '
+                f'style="background-color:#25D366;color:white;padding:15px;border-radius:10px;'
+                f'display:block;text-align:center;text-decoration:none;font-weight:bold;">'
+                f'📲 ENVIAR PARA WHATSAPP</a>',
+                unsafe_allow_html=True
+            )
+
         except Exception as e:
             st.error(f"Erro: {e}")
+
