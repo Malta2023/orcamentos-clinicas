@@ -14,7 +14,10 @@ def limpar_texto(texto):
     texto = "".join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
     return texto.upper().strip()
 
-def converter_preco(valor):
+def converter_preco(valor, nome_exame=""):
+    # Correção manual para o RX Panorâmico de Coluna (conforme solicitado)
+    if "PANORAMICO" in limpar_texto(nome_exame) and "COLUNA" in limpar_texto(nome_exame):
+        return 154.00
     try:
         if pd.isna(valor): return 0.0
         limpo = str(valor).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
@@ -32,7 +35,6 @@ if st.button("GERAR ORÇAMENTO EM LISTA"):
         
         df['NOME_ORIGINAL'] = df.iloc[:, 0]
         df['BUSCA_LIMPA'] = df.iloc[:, 0].apply(limpar_texto)
-        df['PRECO_LIMPO'] = df.iloc[:, 1].apply(converter_preco)
         
         linhas = [l.strip().upper() for l in exames_raw.split('\n') if l.strip()]
         lista_busca = []
@@ -40,16 +42,16 @@ if st.button("GERAR ORÇAMENTO EM LISTA"):
             if "TRAB" in l: continue
             partes = re.split(r' E | & | / | \+ ', l)
             for p in partes:
-                # UNIFICAÇÃO DE TERMOS (Raio X, Rx vira RX)
+                # TRADUÇÕES SALVAS
                 p = p.replace("RAIO X", "RX").replace("RAIO-X", "RX")
-                # LIMPANDO MAPA
+                p = p.replace("TOMOGRAFIA", "TC")
+                p = p.replace("ULTRASSOM", "US").replace("ULTRASSONOGRAFIA", "US").replace("ULTRA-SOM", "US")
                 if "MAPA" in p: p = "MAPA"
                 
                 p = p.replace("EM JEJUM", "").replace("JEJUM", "").strip()
-                
                 p_limpa = limpar_texto(p)
-                # SINÔNIMOS DE URINA
-                if p_limpa in ["EAS", "URINA TIPO 1", "URINA TIPO I"]: p_limpa = "SUMARIO DE URINA"
+                
+                if p_limpa in ["EAS", "URINA TIPO 1"]: p_limpa = "SUMARIO DE URINA"
                 if p_limpa == "GLICEMIA": p_limpa = "GLICOSE"
                 
                 if p_limpa: lista_busca.append(p_limpa)
@@ -58,14 +60,15 @@ if st.button("GERAR ORÇAMENTO EM LISTA"):
         total = 0.0
         
         for termo in lista_busca:
-            # Busca se o termo está em qualquer parte do nome
             resultado = df[df['BUSCA_LIMPA'].str.contains(termo, na=False)]
             
             if not resultado.empty:
-                # Pega o primeiro ou menor preço
-                melhor_opcao = resultado.sort_values(by='PRECO_LIMPO').iloc[0]
-                total += melhor_opcao['PRECO_LIMPO']
-                texto_final += f"* ✅ {melhor_opcao['NOME_ORIGINAL']}: R$ {melhor_opcao['PRECO_LIMPO']:.2f}\n"
+                melhor_opcao = resultado.sort_values(by=df.columns[1]).iloc[0] # Pega o primeiro
+                nome_tab = melhor_opcao['NOME_ORIGINAL']
+                preco_exame = converter_preco(melhor_opcao.iloc[1], nome_tab)
+                
+                total += preco_exame
+                texto_final += f"* ✅ {nome_tab}: R$ {preco_exame:.2f}\n"
             else:
                 texto_final += f"* ❌ {termo}: (Não encontrado)\n"
         
