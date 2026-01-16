@@ -40,12 +40,16 @@ if st.button("GERAR ORÇAMENTO EM LISTA"):
             if "TRAB" in l: continue
             partes = re.split(r' E | & | / | \+ ', l)
             for p in partes:
+                # UNIFICAÇÃO DE TERMOS (Raio X, Rx vira RX)
+                p = p.replace("RAIO X", "RX").replace("RAIO-X", "RX")
+                # LIMPANDO MAPA
+                if "MAPA" in p: p = "MAPA"
+                
                 p = p.replace("EM JEJUM", "").replace("JEJUM", "").strip()
                 
-                # REGRAS DE SINÔNIMOS
                 p_limpa = limpar_texto(p)
-                if p_limpa in ["EAS", "URINA TIPO 1", "URINA TIPO I", "EXAME DE URINA"]:
-                    p_limpa = "SUMARIO DE URINA"
+                # SINÔNIMOS DE URINA
+                if p_limpa in ["EAS", "URINA TIPO 1", "URINA TIPO I"]: p_limpa = "SUMARIO DE URINA"
                 if p_limpa == "GLICEMIA": p_limpa = "GLICOSE"
                 
                 if p_limpa: lista_busca.append(p_limpa)
@@ -54,11 +58,11 @@ if st.button("GERAR ORÇAMENTO EM LISTA"):
         total = 0.0
         
         for termo in lista_busca:
-            # Busca flexível: o termo deve estar contido no nome da tabela
+            # Busca se o termo está em qualquer parte do nome
             resultado = df[df['BUSCA_LIMPA'].str.contains(termo, na=False)]
             
             if not resultado.empty:
-                # Pega o primeiro resultado (ou menor preço se houver vários)
+                # Pega o primeiro ou menor preço
                 melhor_opcao = resultado.sort_values(by='PRECO_LIMPO').iloc[0]
                 total += melhor_opcao['PRECO_LIMPO']
                 texto_final += f"* ✅ {melhor_opcao['NOME_ORIGINAL']}: R$ {melhor_opcao['PRECO_LIMPO']:.2f}\n"
@@ -68,4 +72,4 @@ if st.button("GERAR ORÇAMENTO EM LISTA"):
         texto_final += f"\n*Total: R$ {total:.2f}*\n\nQuando gostaria de agendar?"
         st.code(texto_final, language="text")
     else:
-        st.error("Cole a lista de exames!")
+        st.error("Por favor, cole os exames!")
