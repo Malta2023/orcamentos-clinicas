@@ -1,150 +1,109 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width,initial-scale=1,shrink-to-fit=no,user-scalable=no"
-    />
-    <meta name="theme-color" content="#FFFFFF" />
+import streamlit as st
+import pandas as pd
+import unicodedata
+import re
+from urllib.parse import quote
 
-    <!-- Favicons / PWA -->
-    <link
-      id="favicon"
-      rel="icon"
-      type="image/svg+xml"
-      href="https://orcamentos-clinicas-ibne2gwveka9epyelt87lq.streamlit.app/-/build/favicon.svg"
-    />
-    <link
-      id="alternate-favicon"
-      rel="alternate icon"
-      type="image/x-icon"
-      href="https://orcamentos-clinicas-ibne2gwveka9epyelt87lq.streamlit.app/-/build/favicon.ico"
-    />
-    <link
-      rel="mask-icon"
-      href="https://orcamentos-clinicas-ibne2gwveka9epyelt87lq.streamlit.app/favicon_safari_mask.png"
-      color="#FF2B2B"
-    />
-    <link
-      rel="apple-touch-icon"
-      sizes="256x256"
-      href="https://orcamentos-clinicas-ibne2gwveka9epyelt87lq.streamlit.app/-/build/favicon_256.png"
-    />
-    <link
-      rel="manifest"
-      href="https://orcamentos-clinicas-ibne2gwveka9epyelt87lq.streamlit.app/-/build/manifest.json"
-    />
+st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
-    <!-- Google Tag Manager -->
-    <script>
-      ;(function (w, d, s, l, i) {
-        w[l] = w[l] || []
-        w[l].push({ 'gtm.start': new Date().getTime(), event: 'gtm.js' })
-        var f = d.getElementsByTagName(s)[0],
-          j = d.createElement(s),
-          dl = l != 'dataLayer' ? '&l=' + l : ''
-        j.async = true
-        j.src = 'https://www.googletagmanager.com/gtm.js?id=' + i + dl
-        f.parentNode.insertBefore(j, f)
-      })(window, document, 'script', 'dataLayer', 'GTM-52GRQSL')
-    </script>
-    <!-- End Google Tag Manager -->
+def purificar(txt):
+    if not isinstance(txt, str): return ""
+    txt = txt.upper()
+    txt = unicodedata.normalize("NFD", txt)
+    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
+    return txt.strip()
 
-    <!-- Segment -->
-    <script>
-      !(function () {
-        var analytics = (window.analytics = window.analytics || [])
-        if (!analytics.initialize)
-          if (analytics.invoked)
-            window.console &&
-              console.error &&
-              console.error('Segment snippet included twice.')
-          else {
-            analytics.invoked = !0
-            analytics.methods = [
-              'trackSubmit',
-              'trackClick',
-              'trackLink',
-              'trackForm',
-              'pageview',
-              'identify',
-              'reset',
-              'group',
-              'track',
-              'ready',
-              'alias',
-              'debug',
-              'page',
-              'once',
-              'off',
-              'on',
-              'addSourceMiddleware',
-              'addIntegrationMiddleware',
-              'setAnonymousId',
-              'addDestinationMiddleware',
-            ]
-            analytics.factory = function (e) {
-              return function () {
-                var t = Array.prototype.slice.call(arguments)
-                t.unshift(e)
-                analytics.push(t)
-                return analytics
-              }
-            }
-            for (var e = 0; e < analytics.methods.length; e++) {
-              var key = analytics.methods[e]
-              analytics[key] = analytics.factory(key)
-            }
-            analytics.load = function (key, e) {
-              var t = document.createElement('script')
-              t.type = 'text/javascript'
-              t.async = !0
-              t.src =
-                'https://cdn.segment.com/analytics.js/v1/' +
-                key +
-                '/analytics.min.js'
-              var n = document.getElementsByTagName('script')[0]
-              n.parentNode.insertBefore(t, n)
-              analytics._loadOptions = e
-            }
-            analytics.SNIPPET_VERSION = '4.13.1'
-            analytics.load('GI7vYWHNmWwHbyFjBrvL0jOBA1TpZOXC')
-            // analytics.page()
-          }
-      })()
-    </script>
-    <!-- End Segment -->
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
-    <!-- App bundle -->
-    <script
-      type="module"
-      crossorigin
-      src="https://orcamentos-clinicas-ibne2gwveka9epyelt87lq.streamlit.app/-/build/assets/index-B59N3yFD.js"
-    ></script>
-    <link
-      rel="stylesheet"
-      crossorigin
-      href="https://orcamentos-clinicas-ibne2gwveka9epyelt87lq.streamlit.app/-/build/assets/index-CJlxgJwY.css"
-    />
-  </head>
+st.title("🏥 Orçamento Saúde Dirceu")
 
-  <body>
-    <!-- Google Tag Manager (noscript) -->
-    <noscript>
-      <iframe
-        src="https://www.googletagmanager.com/ns.html?id=GTM-52GRQSL"
-        height="0"
-        width="0"
-        style="display: none; visibility: hidden"
-      ></iframe>
-    </noscript>
-    <!-- End Google Tag Manager (noscript) -->
+if st.button("🔄 NOVO ORÇAMENTO"):
+    st.cache_data.clear()
+    st.rerun()
 
-    <noscript>You need to enable JavaScript to run this app.</noscript>
-    <div id="root"></div>
+clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
+exames_raw = st.text_area("Cole os exames:", height=150)
 
-    <!-- Status page embed -->
-    <script src="https://www.streamlitstatus.com/embed/script.js"></script>
-  </body>
-</html>
+if st.button("✨ GERAR ORÇAMENTO"):
+    if exames_raw:
+        try:
+            url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
+            df = pd.read_csv(url, dtype=str).fillna("")
+            df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
+
+            linhas = re.split(r"\n|,|;| E | & ", exames_raw)
+            total = 0.0
+            sigla = 'S' if clinica_selecionada == "Sabry" else 'L'
+            texto = f"*Orçamento Saúde Dirceu ({sigla})*\n\n"
+
+            for linha in linhas:
+                original = linha.strip()
+                if not original: continue
+                termo = purificar(original)
+
+                nome_exame = None
+                preco = 0.0
+
+                # --- 1. REGRAS FIXAS LABCLINICA ---
+                if clinica_selecionada == "Labclinica":
+                    if "CLEARENCE" in termo and "CREATININA" in termo:
+                        nome_exame = "CLEARENCE DE CREATININA"
+                        preco = 8.16
+                    elif termo == "CREATININA":
+                        nome_exame = "CREATININA"
+                        preco = 6.53
+                    elif termo == "TSH":
+                        nome_exame = "TSH"
+                        preco = 12.24
+                    elif termo in ["GLICOSE", "GLICEMIA"]:
+                        nome_exame = "GLICOSE"
+                        preco = 6.53
+
+                # --- 2. REGRA DE IMAGEM (EXCLUSIVA SABRY) ---
+                if nome_exame is None and clinica_selecionada == "Sabry":
+                    is_rm = "RESSONANCIA" in termo or termo.startswith("RM")
+                    is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC")
+                    
+                    if (is_rm or is_tc) and "ANGIO" not in termo:
+                        nome_exame = original.upper()
+                        preco = 545.00 if is_rm else 165.00
+
+                # --- 3. BUSCA GERAL (ITENS NÃO MAPEADOS ACIMA) ---
+                if nome_exame is None:
+                    # Impede RM/TC na Labclinica
+                    if clinica_selecionada == "Labclinica" and ("RESSONANCIA" in termo or "TOMOGRAFIA" in termo):
+                        pass 
+                    else:
+                        df_busca = df if "ANGIO" in termo else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
+                        melhor_pontuacao = -1
+                        melhor_linha = None
+                        for _, row in df_busca.iterrows():
+                            pontos = 0
+                            t_words = termo.split()
+                            n_words = row["NOME_PURIFICADO"].split()
+                            for w in t_words:
+                                if w in n_words: pontos += 10
+                                elif w in row["NOME_PURIFICADO"]: pontos += 2
+                            
+                            if pontos > melhor_pontuacao and pontos > 0:
+                                melhor_pontuacao = pontos
+                                melhor_linha = row
+                        
+                        if melhor_linha is not None:
+                            nome_exame = melhor_linha.iloc[0]
+                            p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
+                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+
+                if nome_exame:
+                    total += preco
+                    texto += f"✅ {nome_exame}: R$ {preco:.2f}\n"
+                else:
+                    texto += f"❌ {original}: não encontrado\n"
+
+            texto += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
+            st.code(texto)
+            st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
+            
+        except Exception as e:
+            st.error(f"Erro: {e}")
