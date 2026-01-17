@@ -3,15 +3,45 @@ import pandas as pd
 import unicodedata
 import re
 from urllib.parse import quote
+from rapidfuzz import process, fuzz
 
+# Configuração da página
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
+# --- DICIONÁRIO DE SINÔNIMOS ---
+SINONIMOS = {
+    "RM": "RESSONANCIA",
+    "TC": "TOMOGRAFIA",
+    "RX": "RAIO X",
+    "US": "ULTRASSONOGRAFIA",
+    "ULTRAS": "ULTRASSONOGRAFIA",
+    "ULTRA": "ULTRASSONOGRAFIA",
+    "ECO": "ECOCARDIOGRAMA",
+    "HEMOGRAMA": "SANGUE",
+    "SANGUE": "HEMOGRAMA",
+    "URINA": "EAS",
+    "FEZES": "PARASITOLOGICO",
+    "ABD": "ABDOME",
+    "ABD TOTAL": "ABDOME TOTAL",
+    "SUPRA": "SUPRARENAL",
+}
+
 def purificar(txt):
+    """Remove acentos, converte para maiúsculas e limpa espaços."""
     if not isinstance(txt, str): return ""
-    txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    return txt.strip()
+    return txt.upper().strip()
+
+def expandir_sinonimos(termo):
+    """Expande o termo de busca com sinônimos conhecidos."""
+    palavras = termo.split()
+    resultado = []
+    for p in palavras:
+        resultado.append(p)
+        if p in SINONIMOS:
+            resultado.append(SINONIMOS[p])
+    return " ".join(resultado)
 
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
@@ -31,8 +61,12 @@ if st.button("✨ GERAR ORÇAMENTO"):
         try:
             url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
             df = pd.read_csv(url, dtype=str).fillna("")
+            
+            # Criar coluna purificada para busca
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
+            lista_produtos_purificados = df["NOME_PURIFICADO"].tolist()
 
+            # Separar os exames inseridos
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
             total = 0.0
             texto = f"*Orçamento Saúde Dirceu ({'S' if clinica=='Sabry' else 'L'})*\n\n"
@@ -40,58 +74,57 @@ if st.button("✨ GERAR ORÇAMENTO"):
             for linha in linhas:
                 original = linha.strip()
                 if not original: continue
-                termo = purificar(original)
+                
+                termo_limpo = purificar(original)
+                termo_expandido = expandir_sinonimos(termo_limpo)
 
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. IDENTIFICAÇÃO DE CATEGORIAS DE IMAGEM ---
-                is_rm = "RESSONANCIA" in termo or termo.startswith("RM") or " RM " in f" {termo} "
-                is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC") or " TC " in f" {termo} "
-                is_rx = "RAIO X" in termo or termo.startswith("RX") or " RX " in f" {termo} "
-                is_us = "ULTRAS" in termo or termo.startswith("US") or " US " in f" {termo} "
-                tem_angio = "ANGIO" in termo
-
-                # --- 2. REGRA DO ESPELHO E VALORES FIXOS (BLOQUEIO DE BUG ANGIO) ---
-                if (is_rm or is_tc or is_rx or is_us) and not tem_angio:
-                    nome_exame = original.upper() # Mantém exatamente o que o usuário escreveu
-                    
-                    if is_rm:
-                        preco = 545.00
-                    elif is_tc:
-                        preco = 165.00
-                    else:
-                        # Busca valor para RX ou US na tabela bloqueando Angio explicitamente
-                        cat = "RAIO X" if is_rx else "ULTRAS"
-                        filtro = df[df["NOME_PURIFICADO"].str.contains(cat) & ~df["NOME_PURIFICADO"].str.contains("ANGIO")]
-                        if not filtro.empty:
-                            p_raw = filtro.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
-                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                # --- 1. BUSCA INTELIGENTE COM RAPIDFUZZ ---
+                # Filtro prévio para garantir que categorias principais (RM, TC, RX, US) batam
+                categorias = ["RESSONANCIA", "TOMOGRAFIA", "RAIO X", "ULTRASSONOGRAFIA"]
+                cat_presente = next((c for c in categorias if c in termo_expandido), None)
                 
-                # --- 3. BUSCA POR PONTUAÇÃO (LABORATÓRIO OU ANGIO SOLICITADA) ---
-                if nome_exame is None:
-                    melhor_pontuacao = -1
-                    # Se não pediu Angio, removemos da busca para evitar o bug de seleção
-                    df_busca = df if tem_angio else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
-                    
-                    for _, row in df_busca.iterrows():
-                        pontos = 0
-                        t_words = termo.split()
-                        n_words = row["NOME_PURIFICADO"].split()
-                        for w in t_words:
-                            if w in n_words: pontos += 10 
-                            elif w in row["NOME_PURIFICADO"]: pontos += 2
-                        
-                        if pontos > melhor_pontuacao and pontos > 0:
-                            melhor_pontuacao = pontos
-                            melhor_linha = row
-                    
-                    if melhor_pontuacao > 0:
-                        nome_exame = melhor_linha.iloc[0]
-                        p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
-                        preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                df_filtrado = df
+                if cat_presente:
+                    # Se o usuário pediu uma categoria específica, filtramos a lista para essa categoria
+                    df_filtrado = df[df["NOME_PURIFICADO"].str.contains(cat_presente)]
+                
+                if df_filtrado.empty: df_filtrado = df # Fallback se o filtro for muito restritivo
+                
+                lista_busca = df_filtrado["NOME_PURIFICADO"].tolist()
+                indices_originais = df_filtrado.index.tolist()
 
-                # --- 4. MONTAGEM DO TEXTO ---
+                resultado = process.extractOne(
+                    termo_expandido, 
+                    lista_busca, 
+                    scorer=fuzz.token_sort_ratio
+                )
+                
+                if resultado and resultado[1] < 75:
+                    resultado_flex = process.extractOne(
+                        termo_expandido, 
+                        lista_busca, 
+                        scorer=fuzz.token_set_ratio
+                    )
+                    if resultado_flex and resultado_flex[1] > resultado[1]:
+                        resultado = resultado_flex
+
+                if resultado and resultado[1] >= 60:
+                    indice_real = indices_originais[resultado[2]]
+                    melhor_linha = df.loc[indice_real]
+                    nome_exame = melhor_linha.iloc[0]
+                    
+                    # Processamento do preço
+                    p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
+                    match_preco = re.findall(r"\d+\.\d+|\d+", p_raw)
+                    if match_preco:
+                        preco = float(match_preco[0])
+                    else:
+                        preco = 0.0
+
+                # --- 2. MONTAGEM DO TEXTO ---
                 if nome_exame:
                     total += preco
                     texto += f"✅ {nome_exame}: R$ {preco:.2f}\n"
@@ -108,4 +141,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.warning("Por favor, cole os exames antes de gerar o orçamento.")
 
-st.caption("v6.2 - Regra de Espelho + Bloqueio de Angioressonância")
+st.caption("v7.0 - Busca Inteligente com RapidFuzz e Sinônimos")
