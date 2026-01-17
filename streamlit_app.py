@@ -45,37 +45,33 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA PARA TSH (VALOR FIXO LABCLINICA) ---
-                if termo == "TSH":
-                    nome_exame = "TSH"
-                    if clinica_selecionada == "Labclinica":
+                # --- 1. REGRAS FIXAS LABCLINICA ---
+                if clinica_selecionada == "Labclinica":
+                    if "CLEARENCE" in termo and "CREATININA" in termo:
+                        nome_exame = "CLEARENCE DE CREATININA"
+                        preco = 8.16
+                    elif termo == "CREATININA":
+                        nome_exame = "CREATININA"
+                        preco = 6.53
+                    elif termo == "TSH":
+                        nome_exame = "TSH"
                         preco = 12.24
-                    else:
-                        match_tsh = df[df["NOME_PURIFICADO"].str.contains("TSH", na=False)]
-                        if not match_tsh.empty:
-                            p_raw = match_tsh.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
-                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
-                
+                    elif termo in ["GLICOSE", "GLICEMIA"]:
+                        nome_exame = "GLICOSE"
+                        preco = 6.53
+
                 # --- 2. REGRA DE IMAGEM (EXCLUSIVA SABRY) ---
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     is_rm = "RESSONANCIA" in termo or termo.startswith("RM")
                     is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC")
-                    is_rx = "RAIO X" in termo or termo.startswith("RX")
-                    is_us = "ULTRAS" in termo or " US " in f" {termo} "
                     
-                    if (is_rm or is_tc or is_rx or is_us) and "ANGIO" not in termo:
+                    if (is_rm or is_tc) and "ANGIO" not in termo:
                         nome_exame = original.upper()
-                        if is_rm: preco = 545.00
-                        elif is_tc: preco = 165.00
-                        else:
-                            cat = "RAIO X" if is_rx else "ULTRAS"
-                            match_img = df[df["NOME_PURIFICADO"].str.contains(cat) & ~df["NOME_PURIFICADO"].str.contains("ANGIO")]
-                            if not match_img.empty:
-                                p_raw = match_img.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
-                                preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                        preco = 545.00 if is_rm else 165.00
 
-                # --- 3. BUSCA GERAL ---
+                # --- 3. BUSCA GERAL (ITENS NÃO MAPEADOS ACIMA) ---
                 if nome_exame is None:
+                    # Impede RM/TC na Labclinica
                     if clinica_selecionada == "Labclinica" and ("RESSONANCIA" in termo or "TOMOGRAFIA" in termo):
                         pass 
                     else:
