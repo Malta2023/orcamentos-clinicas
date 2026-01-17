@@ -1,95 +1,145 @@
+import streamlit as st
 import pandas as pd
 import unicodedata
 import re
+from urllib.parse import quote
+
+st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
 
 # ================= FUNÇÕES BASE =================
 
 def purificar(texto):
-    if not texto:
+    if not isinstance(texto, str):
         return ""
-    texto = unicodedata.normalize('NFKD', texto)
-    texto = texto.encode('ASCII', 'ignore').decode('ASCII')
+    texto = unicodedata.normalize('NFD', texto)
+    texto = ''.join(c for c in texto if unicodedata.category(c) != 'Mn')
     texto = texto.upper()
     texto = re.sub(r'[^A-Z0-9 ]', ' ', texto)
     texto = re.sub(r'\s+', ' ', texto).strip()
     return texto
 
-def contem_algo(texto, lista):
-    return any(p in texto for p in lista)
-
-# ================= SINÔNIMOS DE REGIÃO =================
+# ================= SINÔNIMOS =================
 
 SINONIMOS = {
-    "CRANIO": ["CABECA", "CRANIO", "ENCEFALO"],
-    "COLUNA": ["COLUNA", "COSTAS", "LOMBAR", "CERVICAL", "TORACICA"],
-    "ABDOMEN": ["ABDOMEN", "BARRIGA", "ABDOME"],
+    "CRANIO": ["CRANIO", "CABECA", "ENCEFALO"],
+    "COLUNA": ["COLUNA", "CERVICAL", "LOMBAR", "DORSAL", "COSTAS"],
+    "ABDOMEN": ["ABDOMEN", "ABDOME", "BARRIGA"],
     "TORAX": ["TORAX", "PEITO"],
     "PELVE": ["PELVE", "BACIA"],
     "JOELHO": ["JOELHO"],
     "OMBRO": ["OMBRO"],
 }
 
-def normalizar_regiao(texto):
-    for regiao, termos in SINONIMOS.items():
-        if contem_algo(texto, termos):
-            return regiao
-    return ""
+def detectar_regiao(texto):
+    for regiao, palavras in SINONIMOS.items():
+        for p in palavras:
+            if p in texto:
+                return regiao
+    return None
 
-# ================= CARREGA TABELA =================
+# ================= BUSCA =================
 
-df = pd.read_csv("/mnt/data/TABELA_LABCLINICA_ATUALIZADA160126.csv")
-df["NOME_PURIFICADO"] = df.iloc[:,0].apply(purificar)
+def buscar_exame(df, tipo, regiao):
+    df_temp = df.copy()
 
-# remove lixo
-df = df[~df["NOME_PURIFICADO"].str.contains("TAXA|URG|ANGIO", na=False)]
+    # remove lixo
+    df_temp = df_temp[~df_temp['NOME_PURIFICADO'].str.contains(
+        "TAXA|URG|URGENCIA|ANGIO|CONTRASTE", na=False
+    )]
 
-# ================= PROCESSAMENTO =================
+    if tipo == "RM":
+        df_temp = df_temp[df_temp['NOME_PURIFICADO'].str.contains("RESSON", na=False)]
+    elif tipo == "TC":
+        df_temp = df_temp[df_temp['NOME_PURIFICADO'].str.contains("TOMOGRAFIA", na=False)]
+    elif tipo == "US":
+        df_temp = df_temp[df_temp['NOME_PURIFICADO'].str.contains("ULTRA", na=False)]
 
-def processar_exame(texto_usuario):
-    texto = purificar(texto_usuario)
+    if regiao:
+        df_temp = df_temp[df_temp['NOME_PURIFICADO'].str.contains(regiao, na=False)]
 
-    # identifica tipo
-    if contem_algo(texto, ["RESSONANCIA"]):
-        tipo = "RESSONANCIA"
-        preco_fixo = 545.00
-    elif contem_algo(texto, ["TOMOGRAFIA", "TC"]):
-        tipo = "TOMOGRAFIA"
-        preco_fixo = 165.00
-    elif contem_algo(texto, ["ULTRASSOM", "ULTRASONOGRAFIA", "US"]):
-        tipo = "ULTRASSOM"
-        preco_fixo = None
+    if df_temp.empty:
+        return None
+
+    df_temp['tam'] = df_temp['NOME_PURIFICADO'].str.len()
+    return df_temp.sort_values('tam').iloc[0]
+
+# ================= URLs =================
+
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
+URL_LAB = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
+
+# ================= APP =================
+
+st.title("🏥 Senhor APP")
+
+clinica = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
+texto = st.text_area("Cole os exames:", height=180)
+
+if st.button("✨ GERAR ORÇAMENTO"):
+    if not texto:
+        st.warning("Cole pelo menos um exame.")
     else:
-        return "❌ Não consegui identificar o tipo de exame."
+        url = URL_SABRY if clinica == "Sabry" else URL_LAB
+        df = pd.read_csv(url, dtype=str).fillna("")
+        df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
 
-    # identifica região
-    regiao = normalizar_regiao(texto)
+        linhas = re.split(r'\n|,| E | & | \+ | / ', texto)
 
-    # se não informou região
-    if not regiao:
-        return f"👉 Você quer {tipo.lower()}, mas de qual região?"
+        total = 0.0
+        saida = f"*Orçamento Saúde Dirceu*\n\n"
 
-    # busca na tabela
-    df_busca = df[df["NOME_PURIFICADO"].str.contains(tipo, na=False)]
-    df_busca = df_busca[df_busca["NOME_PURIFICADO"].str.contains(regiao, na=False)]
+        for item in linhas:
+            original = item.strip()
+            if not original:
+                continue
 
-    if df_busca.empty:
-        return f"❌ Não encontrei {tipo.lower()} para a região informada. Pode explicar melhor?"
+            termo = purificar(original)
+            tipo = None
 
-    exame = df_busca.iloc[0]
-    nome = exame.iloc[0]
+            if "RESSONANCIA" in termo or termo == "RM":
+                tipo = "RM"
+                preco_fixo = 545.00
+            elif "TOMOGRAFIA" in termo or termo == "TC":
+                tipo = "TC"
+                preco_fixo = 165.00
+            elif "ULTRASSOM" in termo or "ULTRASONOGRAFIA" in termo or termo == "US":
+                tipo = "US"
+                preco_fixo = None
+            else:
+                saida += f"❌ {original}: não identificado\n"
+                continue
 
-    if preco_fixo:
-        preco = preco_fixo
-    else:
-        p_str = str(exame.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-        nums = re.findall(r"\d+\.\d+|\d+", p_str)
-        preco = float(nums[0]) if nums else 0.0
+            regiao = detectar_regiao(termo)
 
-    return f"✅ {nome}\n💰 Valor: R$ {preco:.2f}"
+            if not regiao:
+                saida += f"⚠️ {original}: informe a região\n"
+                continue
 
-# ================= EXEMPLO DE USO =================
+            res = buscar_exame(df, tipo, regiao)
 
-# print(processar_exame("ressonancia"))
-# print(processar_exame("ressonancia da cabeca"))
-# print(processar_exame("tc torax"))
-# print(processar_exame("us abdomen"))
+            if res is None:
+                saida += f"❌ {original}: região não encontrada\n"
+                continue
+
+            nome = res.iloc[0]
+
+            if preco_fixo:
+                preco = preco_fixo
+            else:
+                p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+                nums = re.findall(r"\d+\.\d+|\d+", p_str)
+                preco = float(nums[0]) if nums else 0.0
+
+            total += preco
+            saida += f"✅ {nome}: R$ {preco:.2f}\n"
+
+        saida += f"\n*Total: R$ {total:.2f}*\n"
+        st.code(saida)
+
+        st.markdown(
+            f'<a href="https://wa.me/?text={quote(saida)}" target="_blank" '
+            f'style="background:#25D366;color:#fff;padding:14px;border-radius:8px;'
+            f'display:block;text-align:center;text-decoration:none;font-weight:bold;">'
+            f'📲 Enviar para WhatsApp</a>',
+            unsafe_allow_html=True
+        )
