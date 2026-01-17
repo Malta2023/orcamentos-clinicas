@@ -17,6 +17,21 @@ def purificar(txt):
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
     return txt.strip()
 
+def score_busca(termo, nome_tabela):
+    pontos = 0
+    termo_words = termo.split()
+    nome_words = nome_tabela.split()
+
+    for w in termo_words:
+        if w in nome_words:
+            pontos += 2
+
+    for w in termo_words:
+        if w in nome_tabela:
+            pontos += 1
+
+    return pontos
+
 st.title("🏥 Orçamento Saúde Dirceu")
 
 clinica = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
@@ -37,28 +52,24 @@ if st.button("✨ GERAR ORÇAMENTO"):
             continue
 
         termo = purificar(original)
-        nome = None
-        preco = 0.0
 
-        # -------- 1) BUSCA SEMPRE NA TABELA --------
-        match = df[df["NOME_PURIFICADO"].str.contains(termo, na=False)]
-        if not match.empty:
-            match["tam"] = match["NOME_PURIFICADO"].str.len()
-            row = match.sort_values("tam").iloc[0]
-            nome = row.iloc[0]
-            p = row.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
+        # sinônimos simples
+        if termo in ["GLICEMIA", "GLICOSE"]:
+            termo = "GLICOSE"
+
+        melhor_pontuacao = 0
+        melhor_linha = None
+
+        for _, row in df.iterrows():
+            pontos = score_busca(termo, row["NOME_PURIFICADO"])
+            if pontos > melhor_pontuacao:
+                melhor_pontuacao = pontos
+                melhor_linha = row
+
+        if melhor_linha is not None and melhor_pontuacao > 0:
+            nome = melhor_linha.iloc[0]
+            p = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
             preco = float(re.findall(r"\d+\.\d+|\d+", p)[0])
-
-        # -------- 2) SE NÃO ACHOU, APLICA REGRAS FIXAS --------
-        if not nome:
-            if "RESSONANCIA" in termo:
-                nome = "RESSONÂNCIA"
-                preco = 545.00
-            elif "TOMOGRAFIA" in termo or termo.startswith("TC"):
-                nome = "TOMOGRAFIA"
-                preco = 165.00
-
-        if nome:
             total += preco
             texto += f"✅ {nome}: R$ {preco:.2f}\n"
         else:
