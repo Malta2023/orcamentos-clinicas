@@ -1,92 +1,73 @@
-import streamlit as st
-import pandas as pd
-import unicodedata
-import re
-from urllib.parse import quote
+function buscarExameMaisProximo(exameDigitado, regiaoDigitada) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const aba = ss.getSheetByName("TABELA");
+  const dados = aba.getDataRange().getValues();
 
-st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
+  exameDigitado = normalizarTexto(exameDigitado);
+  regiaoDigitada = normalizarTexto(regiaoDigitada);
 
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
+  let melhorResultado = null;
+  let menorDistancia = 9999;
 
-def purificar(txt):
-    if not isinstance(txt, str):
-        return ""
-    txt = txt.upper()
-    txt = unicodedata.normalize("NFD", txt)
-    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    return txt.strip()
+  for (let i = 1; i < dados.length; i++) {
+    const exameTabela = normalizarTexto(dados[i][0]);
+    const regiaoTabela = normalizarTexto(dados[i][1]);
+    const valor = dados[i][2];
 
-def score_busca(termo, nome):
-    pontos = 0
-    termo_words = termo.split()
-    nome_words = nome.split()
+    if (regiaoTabela !== regiaoDigitada) continue;
 
-    for w in termo_words:
-        if w in nome_words:
-            pontos += 2
-        elif w in nome:
-            pontos += 1
+    const distancia = distanciaLevenshtein(exameDigitado, exameTabela);
 
-    return pontos
+    if (distancia < menorDistancia) {
+      menorDistancia = distancia;
+      melhorResultado = {
+        exame: dados[i][0],
+        regiao: dados[i][1],
+        valor: valor
+      };
+    }
+  }
 
-st.title("🏥 Orçamento Saúde Dirceu")
+  if (!melhorResultado || menorDistancia > 6) {
+    return "Exame não encontrado na tabela";
+  }
 
-clinica = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
-exames_raw = st.text_area("Cole os exames:")
+  return melhorResultado;
+}
 
-if st.button("✨ GERAR ORÇAMENTO"):
-    url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
-    df = pd.read_csv(url, dtype=str).fillna("")
-    df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
+function normalizarTexto(texto) {
+  return texto
+    .toString()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
 
-    linhas = re.split(r"\n|,|;", exames_raw)
-    total = 0
-    texto = f"*Orçamento Saúde Dirceu ({'S' if clinica=='Sabry' else 'L'})*\n\n"
+function distanciaLevenshtein(a, b) {
+  const matriz = [];
 
-    for linha in linhas:
-        original = linha.strip()
-        if not original:
-            continue
+  for (let i = 0; i <= b.length; i++) {
+    matriz[i] = [i];
+  }
 
-        termo = purificar(original)
+  for (let j = 0; j <= a.length; j++) {
+    matriz[0][j] = j;
+  }
 
-        # sinônimos
-        if termo in ["GLICEMIA", "GLICOSE"]:
-            termo = "GLICOSE"
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matriz[i][j] = matriz[i - 1][j - 1];
+      } else {
+        matriz[i][j] = Math.min(
+          matriz[i - 1][j - 1] + 1,
+          matriz[i][j - 1] + 1,
+          matriz[i - 1][j] + 1
+        );
+      }
+    }
+  }
 
-        melhor_pontuacao = 0
-        melhor = None
-
-        for _, row in df.iterrows():
-            nome_tab = row["NOME_PURIFICADO"]
-
-            # 🚫 BLOQUEIO TOTAL DE ANGIO
-            if "ANGIO" in nome_tab and "ANGIO" not in termo:
-                continue
-
-            pontos = score_busca(termo, nome_tab)
-            if pontos > melhor_pontuacao:
-                melhor_pontuacao = pontos
-                melhor = row
-
-        if melhor is not None and melhor_pontuacao > 0:
-            nome = melhor.iloc[0]
-            p = melhor.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
-            preco = float(re.findall(r"\d+\.\d+|\d+", p)[0])
-            total += preco
-            texto += f"✅ {nome}: R$ {preco:.2f}\n"
-        else:
-            texto += f"❌ {original}: não encontrado\n"
-
-    texto += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
-
-    st.code(texto)
-
-    st.markdown(
-        f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" '
-        f'style="background:#25D366;color:white;padding:15px;border-radius:10px;'
-        f'display:block;text-align:center;font-weight:bold;text-decoration:none;">'
-        f'📲 ENVIAR PARA WHATSAPP</a>',
-        unsafe_allow_html=True
-    )
+  return matriz[b.length][a.length];
+}
