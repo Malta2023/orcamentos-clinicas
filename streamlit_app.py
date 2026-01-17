@@ -45,13 +45,16 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRA PARA TSH (NOMENCLATURA LIMPA) ---
+                # --- 1. REGRA PARA TSH (VALOR FIXO LABCLINICA) ---
                 if termo == "TSH":
                     nome_exame = "TSH"
-                    match_tsh = df[df["NOME_PURIFICADO"].str.contains("TSH", na=False)]
-                    if not match_tsh.empty:
-                        p_raw = match_tsh.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
-                        preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                    if clinica_selecionada == "Labclinica":
+                        preco = 12.24
+                    else:
+                        match_tsh = df[df["NOME_PURIFICADO"].str.contains("TSH", na=False)]
+                        if not match_tsh.empty:
+                            p_raw = match_tsh.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
+                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
                 
                 # --- 2. REGRA DE IMAGEM (EXCLUSIVA SABRY) ---
                 if nome_exame is None and clinica_selecionada == "Sabry":
@@ -65,16 +68,14 @@ if st.button("✨ GERAR ORÇAMENTO"):
                         if is_rm: preco = 545.00
                         elif is_tc: preco = 165.00
                         else:
-                            # Busca preço para RX e US na planilha Sabry
                             cat = "RAIO X" if is_rx else "ULTRAS"
                             match_img = df[df["NOME_PURIFICADO"].str.contains(cat) & ~df["NOME_PURIFICADO"].str.contains("ANGIO")]
                             if not match_img.empty:
                                 p_raw = match_img.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
                                 preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
 
-                # --- 3. BUSCA GERAL (LABCLINICA OU ITENS FORA DAS REGRAS ACIMA) ---
+                # --- 3. BUSCA GERAL ---
                 if nome_exame is None:
-                    # Se for Labclinica e for Ressonância/TC, vamos ignorar
                     if clinica_selecionada == "Labclinica" and ("RESSONANCIA" in termo or "TOMOGRAFIA" in termo):
                         pass 
                     else:
@@ -98,7 +99,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
                             p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
                             preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
 
-                # --- MONTAGEM DO RESULTADO ---
                 if nome_exame:
                     total += preco
                     texto += f"✅ {nome_exame}: R$ {preco:.2f}\n"
