@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import unicodedata
 
+st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
+st.title("Orçamento Saúde Dirceu")
+
 # ---------- FUNÇÕES ----------
 def normalizar(texto):
     if not isinstance(texto, str):
@@ -45,39 +48,34 @@ def buscar_preco(df, exame_padrao):
     if filtro.empty:
         return None
 
-    linha = filtro.iloc[0]
-    return float(linha["VALOR"])
+    return float(filtro.iloc[0]["VALOR"])
 
-# ---------- APP ----------
-st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
-st.title("Orçamento Saúde Dirceu")
+# ---------- UPLOAD ----------
+st.subheader("Selecione a tabela")
+arquivo = st.file_uploader("Envie a tabela CSV", type=["csv"])
 
-tabela = st.selectbox("Escolha a tabela", ["Sabry", "Labclinica"])
+if arquivo:
+    df = pd.read_csv(arquivo)
 
-if tabela == "Sabry":
-    df = pd.read_csv("TABELA_SABRY_ATUALIZADA 160126.csv")
-else:
-    df = pd.read_csv("TABELA_LABCLINICA_ATUALIZADA160126.csv")
+    entrada = st.text_area(
+        "Digite os exames (um por linha)",
+        placeholder="Ex:\nressonancia\ntc\nglicemia"
+    )
 
-entrada = st.text_area(
-    "Digite os exames (um por linha)",
-    placeholder="Ex: \nressonancia\ntc\nus\nglicemia"
-)
+    if st.button("Gerar orçamento"):
+        exames = [e for e in entrada.split("\n") if e.strip()]
+        total = 0.0
 
-if st.button("Gerar orçamento"):
-    exames = [e for e in entrada.split("\n") if e.strip()]
-    total = 0.0
+        st.markdown("### Orçamento")
 
-    st.markdown("### Orçamento")
+        for exame in exames:
+            exame_padrao = padronizar_exame(exame)
+            preco = buscar_preco(df, exame_padrao)
 
-    for exame in exames:
-        exame_padrao = padronizar_exame(exame)
-        preco = buscar_preco(df, exame_padrao)
+            if preco is None:
+                st.write(f"❌ {exame}: não encontrado")
+            else:
+                st.write(f"✅ {exame_padrao}: R$ {preco:.2f}")
+                total += preco
 
-        if preco is None:
-            st.write(f"❌ {exame}: não encontrado")
-        else:
-            st.write(f"✅ {exame_padrao}: R$ {preco:.2f}")
-            total += preco
-
-    st.markdown(f"### 💰 Total: R$ {total:.2f}")
+        st.markdown(f"### 💰 Total: R$ {total:.2f}")
