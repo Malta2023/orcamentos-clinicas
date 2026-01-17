@@ -1,6 +1,3 @@
-certo 1701
-
-
 import streamlit as st
 import pandas as pd
 import unicodedata
