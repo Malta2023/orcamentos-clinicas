@@ -17,17 +17,15 @@ def purificar(txt):
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
     return txt.strip()
 
-def score_busca(termo, nome_tabela):
+def score_busca(termo, nome):
     pontos = 0
     termo_words = termo.split()
-    nome_words = nome_tabela.split()
+    nome_words = nome.split()
 
     for w in termo_words:
         if w in nome_words:
             pontos += 2
-
-    for w in termo_words:
-        if w in nome_tabela:
+        elif w in nome:
             pontos += 1
 
     return pontos
@@ -53,22 +51,28 @@ if st.button("✨ GERAR ORÇAMENTO"):
 
         termo = purificar(original)
 
-        # sinônimos simples
+        # sinônimos
         if termo in ["GLICEMIA", "GLICOSE"]:
             termo = "GLICOSE"
 
         melhor_pontuacao = 0
-        melhor_linha = None
+        melhor = None
 
         for _, row in df.iterrows():
-            pontos = score_busca(termo, row["NOME_PURIFICADO"])
+            nome_tab = row["NOME_PURIFICADO"]
+
+            # 🚫 BLOQUEIO TOTAL DE ANGIO
+            if "ANGIO" in nome_tab and "ANGIO" not in termo:
+                continue
+
+            pontos = score_busca(termo, nome_tab)
             if pontos > melhor_pontuacao:
                 melhor_pontuacao = pontos
-                melhor_linha = row
+                melhor = row
 
-        if melhor_linha is not None and melhor_pontuacao > 0:
-            nome = melhor_linha.iloc[0]
-            p = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
+        if melhor is not None and melhor_pontuacao > 0:
+            nome = melhor.iloc[0]
+            p = melhor.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
             preco = float(re.findall(r"\d+\.\d+|\d+", p)[0])
             total += preco
             texto += f"✅ {nome}: R$ {preco:.2f}\n"
