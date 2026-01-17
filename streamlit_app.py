@@ -3,7 +3,13 @@ import pandas as pd
 import unicodedata
 import re
 from urllib.parse import quote
-from rapidfuzz import process, fuzz
+
+# Tenta importar rapidfuzz, se não existir, avisa o usuário de forma amigável
+try:
+    from rapidfuzz import process, fuzz
+    HAS_RAPIDFUZZ = True
+except ImportError:
+    HAS_RAPIDFUZZ = False
 
 # Configuração da página
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
@@ -48,6 +54,12 @@ URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF7
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
+# Verificação de dependência
+if not HAS_RAPIDFUZZ:
+    st.error("⚠️ A biblioteca 'rapidfuzz' não foi encontrada.")
+    st.info("Para corrigir, adicione 'rapidfuzz' ao seu arquivo requirements.txt no GitHub ou execute 'pip install rapidfuzz' no seu terminal.")
+    st.stop()
+
 # --- BOTÃO NOVO ORÇAMENTO ---
 if st.button("🔄 NOVO ORÇAMENTO"):
     st.cache_data.clear()
@@ -64,7 +76,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
             
             # Criar coluna purificada para busca
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
-            lista_produtos_purificados = df["NOME_PURIFICADO"].tolist()
 
             # Separar os exames inseridos
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
@@ -81,17 +92,15 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. BUSCA INTELIGENTE COM RAPIDFUZZ ---
-                # Filtro prévio para garantir que categorias principais (RM, TC, RX, US) batam
+                # --- BUSCA INTELIGENTE ---
                 categorias = ["RESSONANCIA", "TOMOGRAFIA", "RAIO X", "ULTRASSONOGRAFIA"]
                 cat_presente = next((c for c in categorias if c in termo_expandido), None)
                 
                 df_filtrado = df
                 if cat_presente:
-                    # Se o usuário pediu uma categoria específica, filtramos a lista para essa categoria
                     df_filtrado = df[df["NOME_PURIFICADO"].str.contains(cat_presente)]
                 
-                if df_filtrado.empty: df_filtrado = df # Fallback se o filtro for muito restritivo
+                if df_filtrado.empty: df_filtrado = df
                 
                 lista_busca = df_filtrado["NOME_PURIFICADO"].tolist()
                 indices_originais = df_filtrado.index.tolist()
@@ -121,10 +130,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     match_preco = re.findall(r"\d+\.\d+|\d+", p_raw)
                     if match_preco:
                         preco = float(match_preco[0])
-                    else:
-                        preco = 0.0
 
-                # --- 2. MONTAGEM DO TEXTO ---
+                # --- MONTAGEM DO TEXTO ---
                 if nome_exame:
                     total += preco
                     texto += f"✅ {nome_exame}: R$ {preco:.2f}\n"
@@ -141,4 +148,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
     else:
         st.warning("Por favor, cole os exames antes de gerar o orçamento.")
 
-st.caption("v7.0 - Busca Inteligente com RapidFuzz e Sinônimos")
+st.caption("v7.1 - Busca Inteligente (Fuzzy) + Sinônimos")
