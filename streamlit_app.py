@@ -1,109 +1,95 @@
-import streamlit as st
 import pandas as pd
-import re
 import unicodedata
-from urllib.parse import quote
+import re
 
-st.set_page_config(page_title="Senhor APP", page_icon="🏥", layout="centered")
+# ================= FUNÇÕES BASE =================
 
-def purificar(t):
-    if not isinstance(t, str):
+def purificar(texto):
+    if not texto:
         return ""
-    t = t.replace('Н', 'H').replace('Е', 'E').replace('М', 'M').replace('О', 'O').replace('А', 'A').replace('С', 'C')
-    t = "".join(c for c in unicodedata.normalize('NFD', t) if unicodedata.category(c) != 'Mn')
-    return t.upper().strip()
+    texto = unicodedata.normalize('NFKD', texto)
+    texto = texto.encode('ASCII', 'ignore').decode('ASCII')
+    texto = texto.upper()
+    texto = re.sub(r'[^A-Z0-9 ]', ' ', texto)
+    texto = re.sub(r'\s+', ' ', texto).strip()
+    return texto
 
-def buscar_exame(df, termo):
-    palavras = [p for p in termo.split() if len(p) > 3]
-    if not palavras:
-        return None
+def contem_algo(texto, lista):
+    return any(p in texto for p in lista)
 
-    df_temp = df.copy()
+# ================= SINÔNIMOS DE REGIÃO =================
 
-    # 👉 REGRA: só considera ANGIO se o usuário digitar ANGIO
-    if "ANGIO" not in termo:
-        df_temp = df_temp[~df_temp['NOME_PURIFICADO'].str.contains("ANGIO", na=False)]
+SINONIMOS = {
+    "CRANIO": ["CABECA", "CRANIO", "ENCEFALO"],
+    "COLUNA": ["COLUNA", "COSTAS", "LOMBAR", "CERVICAL", "TORACICA"],
+    "ABDOMEN": ["ABDOMEN", "BARRIGA", "ABDOME"],
+    "TORAX": ["TORAX", "PEITO"],
+    "PELVE": ["PELVE", "BACIA"],
+    "JOELHO": ["JOELHO"],
+    "OMBRO": ["OMBRO"],
+}
 
-    for p in palavras:
-        df_temp = df_temp[df_temp['NOME_PURIFICADO'].str.contains(p, na=False, regex=False)]
+def normalizar_regiao(texto):
+    for regiao, termos in SINONIMOS.items():
+        if contem_algo(texto, termos):
+            return regiao
+    return ""
 
-    if df_temp.empty:
-        return None
+# ================= CARREGA TABELA =================
 
-    df_temp['tam'] = df_temp['NOME_PURIFICADO'].str.len()
-    return df_temp.sort_values('tam').iloc[0]
+df = pd.read_csv("/mnt/data/TABELA_LABCLINICA_ATUALIZADA160126.csv")
+df["NOME_PURIFICADO"] = df.iloc[:,0].apply(purificar)
 
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
+# remove lixo
+df = df[~df["NOME_PURIFICADO"].str.contains("TAXA|URG|ANGIO", na=False)]
 
-st.title("🏥 Senhor APP")
+# ================= PROCESSAMENTO =================
 
-if st.button("🔄 NOVO ORÇAMENTO"):
-    st.cache_data.clear()
-    st.rerun()
+def processar_exame(texto_usuario):
+    texto = purificar(texto_usuario)
 
-clinica = st.radio("Selecione a Clínica:", ["Sabry", "Labclinica"], horizontal=True)
-exames_raw = st.text_area("Cole os exames aqui:", height=200)
+    # identifica tipo
+    if contem_algo(texto, ["RESSONANCIA"]):
+        tipo = "RESSONANCIA"
+        preco_fixo = 545.00
+    elif contem_algo(texto, ["TOMOGRAFIA", "TC"]):
+        tipo = "TOMOGRAFIA"
+        preco_fixo = 165.00
+    elif contem_algo(texto, ["ULTRASSOM", "ULTRASONOGRAFIA", "US"]):
+        tipo = "ULTRASSOM"
+        preco_fixo = None
+    else:
+        return "❌ Não consegui identificar o tipo de exame."
 
-if st.button("✨ GERAR ORÇAMENTO"):
-    if exames_raw:
-        url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
+    # identifica região
+    regiao = normalizar_regiao(texto)
 
-        try:
-            df = pd.read_csv(url, dtype=str).fillna("")
-            df['NOME_PURIFICADO'] = df.iloc[:, 0].apply(purificar)
+    # se não informou região
+    if not regiao:
+        return f"👉 Você quer {tipo.lower()}, mas de qual região?"
 
-            linhas = re.split(r'\n|,| E | & | \+ | / ', exames_raw)
+    # busca na tabela
+    df_busca = df[df["NOME_PURIFICADO"].str.contains(tipo, na=False)]
+    df_busca = df_busca[df_busca["NOME_PURIFICADO"].str.contains(regiao, na=False)]
 
-            texto_final = f"*Orçamento Saúde Dirceu {'(S)' if clinica == 'Sabry' else '(L)'}*\n\n"
-            total = 0.0
+    if df_busca.empty:
+        return f"❌ Não encontrei {tipo.lower()} para a região informada. Pode explicar melhor?"
 
-            for item in linhas:
-                original = item.strip()
-                if not original:
-                    continue
+    exame = df_busca.iloc[0]
+    nome = exame.iloc[0]
 
-                termo = purificar(original)
-                nome_exame = None
-                preco = 0.0
+    if preco_fixo:
+        preco = preco_fixo
+    else:
+        p_str = str(exame.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
+        nums = re.findall(r"\d+\.\d+|\d+", p_str)
+        preco = float(nums[0]) if nums else 0.0
 
-                # 👉 REGRA FIXA RM / TC (genérica)
-                if "RESSONANCIA" in termo and "ANGIO" not in termo:
-                    res = buscar_exame(df, termo)
-                    if res is not None:
-                        nome_exame = res.iloc[0]
-                        preco = 545.00
+    return f"✅ {nome}\n💰 Valor: R$ {preco:.2f}"
 
-                elif ("TC" in termo or "TOMOGRAFIA" in termo) and "ANGIO" not in termo:
-                    res = buscar_exame(df, termo)
-                    if res is not None:
-                        nome_exame = res.iloc[0]
-                        preco = 165.00
+# ================= EXEMPLO DE USO =================
 
-                else:
-                    res = buscar_exame(df, termo)
-                    if res is not None:
-                        nome_exame = res.iloc[0]
-                        p_str = str(res.iloc[1]).replace('R$', '').replace('.', '').replace(',', '.')
-                        nums = re.findall(r"\d+\.\d+|\d+", p_str)
-                        preco = float(nums[0]) if nums else 0.0
-
-                if nome_exame:
-                    total += preco
-                    texto_final += f"✅ {nome_exame}: R$ {preco:.2f}\n"
-                else:
-                    texto_final += f"❌ {original}: (Não encontrado)\n"
-
-            texto_final += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
-
-            st.code(texto_final)
-            st.markdown(
-                f'<a href="https://wa.me/?text={quote(texto_final)}" target="_blank" '
-                f'style="background-color:#25D366;color:white;padding:15px;border-radius:10px;'
-                f'display:block;text-align:center;text-decoration:none;font-weight:bold;">'
-                f'📲 ENVIAR PARA WHATSAPP</a>',
-                unsafe_allow_html=True
-            )
-
-        except Exception as e:
-            st.error(f"Erro: {e}")
+# print(processar_exame("ressonancia"))
+# print(processar_exame("ressonancia da cabeca"))
+# print(processar_exame("tc torax"))
+# print(processar_exame("us abdomen"))
