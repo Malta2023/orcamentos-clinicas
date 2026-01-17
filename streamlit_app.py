@@ -1,206 +1,111 @@
-# app.py
-import re
-import unicodedata
-import hashlib
-from io import BytesIO
+html certo app saúde gemini
 
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import unicodedata
+import re
+from urllib.parse import quote
 
-st.set_page_config(page_title="Orcamentos de Exames", layout="centered")
+st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
-# --------- util ---------
+def purificar(txt):
+    if not isinstance(txt, str): return ""
+    txt = txt.upper()
+    txt = unicodedata.normalize("NFD", txt)
+    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
+    return txt.strip()
 
-def remove_acentos(txt: str) -> str:
-    txt = "" if txt is None else str(txt)
-    return "".join(
-        c for c in unicodedata.normalize("NFD", txt)
-        if unicodedata.category(c) != "Mn"
-    )
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
-def normaliza_nome(nome: str) -> str:
-    s = remove_acentos(nome).upper().strip()
-    s = re.sub(r"\s+", " ", s)
-    return s
+st.title("🏥 Orçamento Saúde Dirceu")
 
-# regras salvas
-SINONIMOS = {
-    "EAS": "SUMARIO DE URINA",
-    "URINA TIPO 1": "SUMARIO DE URINA",
-    "SUMARIO URINA": "SUMARIO DE URINA",
-}
+if st.button("🔄 NOVO ORÇAMENTO"):
+    st.cache_data.clear()
+    st.rerun()
 
-SIGLAS = {
-    "TC": "TOMOGRAFIA",
-    "RX": "RAIO X",
-    "US": "ULTRASSOM",
-}
+clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
+exames_raw = st.text_area("Cole os exames:", height=150)
 
-def aplica_regras(txt: str) -> str:
-    s = normaliza_nome(txt)
-    for sigla, full in SIGLAS.items():
-        s = re.sub(rf"\b{sigla}\b", full, s)
-    for k, v in SINONIMOS.items():
-        s = s.replace(k, v)
-    return s
-
-
-def load_table_from_bytes(file_bytes: bytes, kind: str) -> pd.DataFrame:
-    bio = BytesIO(file_bytes)
-    df = pd.read_excel(bio)
-
-    if kind == "LABCLINICA":
-        df = df.rename(columns={"Exame": "exame", "Valor": "valor"})
-        df = df.dropna(subset=["exame"])
-        df["valor_num"] = pd.to_numeric(df["valor"], errors="coerce")
-
-    else:  # SABRY
-        df.columns = [str(c).strip().lower() for c in df.columns]
-        if "exame" not in df.columns or "valor" not in df.columns:
-            raise ValueError("Tabela Sabry precisa ter colunas 'exame' e 'valor'.")
-        df = df.dropna(subset=["exame"])
-        df["valor_num"] = (
-            df["valor"].astype(str)
-            .str.replace("R$", "", regex=False)
-            .str.replace(".", "", regex=False)
-            .str.replace(",", ".", regex=False)
-            .str.strip()
-        )
-        df["valor_num"] = pd.to_numeric(df["valor_num"], errors="coerce")
-
-    df["exame_norm"] = df["exame"].apply(aplica_regras)
-    return df[["exame", "valor_num", "exame_norm"]]
-
-
-def parse_input(texto: str) -> list[str]:
-    linhas = [l.strip() for l in texto.splitlines() if l.strip()]
-    exames = []
-    for l in linhas:
-        l = re.sub(r"^\d+\s*[\.)-]?\s*", "", l)  # remove numeração
-        exames.append(l)
-    return exames
-
-
-def find_best(df: pd.DataFrame, termo: str):
-    t = aplica_regras(termo)
-
-    m = df[df["exame_norm"].str.contains(re.escape(t), na=False)]
-    if m.empty:
-        parts = [p for p in t.split() if len(p) > 2]
-        if parts:
-            cond = True
-            for p in parts:
-                cond = cond & df["exame_norm"].str.contains(re.escape(p), na=False)
-            m = df[cond]
-
-    if m.empty:
-        return None
-
-    m = m.assign(tam=m["exame_norm"].str.len()).sort_values("tam")
-    return m.iloc[0]
-
-
-def moeda_br(v: float) -> str:
-    return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def file_hash(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()[:12]
-
-
-# --------- UI ---------
-
-st.title("Orcamentos de exames")
-st.write("Online, abre no celular e no tablet. Escolha a tabela, cole os exames e copie o orçamento.")
-
-col1, col2 = st.columns(2)
-with col1:
-    tabela_escolhida = st.selectbox("Qual tabela usar?", ["LABCLINICA", "SABRY"], key="kind")
-with col2:
-    arquivo = st.file_uploader("Enviar tabela (.xlsx)", type=["xlsx"], key="upload")
-
-# --- memoria simples: guarda o ultimo arquivo por tipo (LABCLINICA/SABRY) ---
-if "saved" not in st.session_state:
-    st.session_state.saved = {"LABCLINICA": None, "SABRY": None}
-if "df_cache" not in st.session_state:
-    st.session_state.df_cache = {"LABCLINICA": None, "SABRY": None}
-
-# se subir arquivo novo, salva
-if arquivo is not None:
-    b = arquivo.read()
-    st.session_state.saved[tabela_escolhida] = {
-        "bytes": b,
-        "name": arquivo.name,
-        "hash": file_hash(b),
-    }
-    st.session_state.df_cache[tabela_escolhida] = None
-    st.success(f"Tabela {tabela_escolhida} salva: {arquivo.name}")
-
-# botao pra limpar
-with st.expander("Opcoes"):
-    if st.button("Esquecer tabela salva desta opcao"):
-        st.session_state.saved[tabela_escolhida] = None
-        st.session_state.df_cache[tabela_escolhida] = None
-        st.info("Tabela removida.")
-
-# carrega tabela salva automaticamente
-saved = st.session_state.saved.get(tabela_escolhida)
-if saved is None:
-    st.warning("Nenhuma tabela salva para essa opcao. Envie a planilha.")
-    df = None
-else:
-    if st.session_state.df_cache[tabela_escolhida] is None:
+if st.button("✨ GERAR ORÇAMENTO"):
+    if exames_raw:
         try:
-            df = load_table_from_bytes(saved["bytes"], tabela_escolhida)
-            st.session_state.df_cache[tabela_escolhida] = df
+            url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
+            df = pd.read_csv(url, dtype=str).fillna("")
+            df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
+
+            linhas = re.split(r"\n|,|;| E | & ", exames_raw)
+            total = 0.0
+            sigla = 'S' if clinica_selecionada == "Sabry" else 'L'
+            texto = f"*Orçamento Saúde Dirceu ({sigla})*\n\n"
+
+            for linha in linhas:
+                original = linha.strip()
+                if not original: continue
+                termo = purificar(original)
+
+                nome_exame = None
+                preco = 0.0
+
+                # --- 1. REGRAS FIXAS LABCLINICA ---
+                if clinica_selecionada == "Labclinica":
+                    if "CLEARENCE" in termo and "CREATININA" in termo:
+                        nome_exame = "CLEARENCE DE CREATININA"
+                        preco = 8.16
+                    elif termo == "CREATININA":
+                        nome_exame = "CREATININA"
+                        preco = 6.53
+                    elif termo == "TSH":
+                        nome_exame = "TSH"
+                        preco = 12.24
+                    elif termo in ["GLICOSE", "GLICEMIA"]:
+                        nome_exame = "GLICOSE"
+                        preco = 6.53
+
+                # --- 2. REGRA DE IMAGEM (EXCLUSIVA SABRY) ---
+                if nome_exame is None and clinica_selecionada == "Sabry":
+                    is_rm = "RESSONANCIA" in termo or termo.startswith("RM")
+                    is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC")
+                    
+                    if (is_rm or is_tc) and "ANGIO" not in termo:
+                        nome_exame = original.upper()
+                        preco = 545.00 if is_rm else 165.00
+
+                # --- 3. BUSCA GERAL (ITENS NÃO MAPEADOS ACIMA) ---
+                if nome_exame is None:
+                    # Impede RM/TC na Labclinica
+                    if clinica_selecionada == "Labclinica" and ("RESSONANCIA" in termo or "TOMOGRAFIA" in termo):
+                        pass 
+                    else:
+                        df_busca = df if "ANGIO" in termo else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
+                        melhor_pontuacao = -1
+                        melhor_linha = None
+                        for _, row in df_busca.iterrows():
+                            pontos = 0
+                            t_words = termo.split()
+                            n_words = row["NOME_PURIFICADO"].split()
+                            for w in t_words:
+                                if w in n_words: pontos += 10
+                                elif w in row["NOME_PURIFICADO"]: pontos += 2
+                            
+                            if pontos > melhor_pontuacao and pontos > 0:
+                                melhor_pontuacao = pontos
+                                melhor_linha = row
+                        
+                        if melhor_linha is not None:
+                            nome_exame = melhor_linha.iloc[0]
+                            p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
+                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+
+                if nome_exame:
+                    total += preco
+                    texto += f"✅ {nome_exame}: R$ {preco:.2f}\n"
+                else:
+                    texto += f"❌ {original}: não encontrado\n"
+
+            texto += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
+            st.code(texto)
+            st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
+            
         except Exception as e:
-            st.session_state.df_cache[tabela_escolhida] = None
-            st.error(str(e))
-            df = None
-    else:
-        df = st.session_state.df_cache[tabela_escolhida]
-
-    if df is not None:
-        st.caption(f"Usando: {saved['name']} | id: {saved['hash']}")
-
-texto = st.text_area(
-    "Cole aqui os exames (um por linha)",
-    height=220,
-    placeholder="Exemplo:\nhemograma\nsodio\npotassio\ncalcio\n...",
-)
-
-if st.button("Gerar orçamento"):
-    if df is None:
-        st.warning("Envie a tabela primeiro.")
-    else:
-        exames = parse_input(texto)
-        itens = []
-        total = 0.0
-
-        for ex in exames:
-            row = find_best(df, ex)
-            if row is None or pd.isna(row["valor_num"]):
-                itens.append((ex, None))
-            else:
-                v = float(row["valor_num"])
-                itens.append((ex, v))
-                total += v
-
-        linhas = []
-        for nome, v in itens:
-            if v is None:
-                linhas.append(f"{nome} — nao encontrado")
-            else:
-                linhas.append(f"{nome} — {moeda_br(v)}")
-        linhas.append("")
-        linhas.append(f"Total: {moeda_br(total)}")
-
-        st.subheader("Orçamento")
-        st.code("\n".join(linhas), language="text")
-
-        st.download_button(
-            "Baixar orçamento (txt)",
-            data="\n".join(linhas),
-            file_name="orcamento.txt",
-            mime="text/plain",
-        )
+            st.error(f"Erro: {e}")
