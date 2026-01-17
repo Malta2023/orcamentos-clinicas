@@ -1,5 +1,3 @@
-html certo app saúde gemini
-
 import streamlit as st
 import pandas as pd
 import unicodedata
