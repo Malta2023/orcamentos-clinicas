@@ -1,81 +1,88 @@
 import streamlit as st
 import pandas as pd
 import unicodedata
+import re
+from urllib.parse import quote
 
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
-st.title("Orçamento Saúde Dirceu")
 
-# ---------- FUNÇÕES ----------
-def normalizar(texto):
-    if not isinstance(texto, str):
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
+
+def purificar(txt):
+    if not isinstance(txt, str):
         return ""
-    texto = texto.lower()
-    texto = unicodedata.normalize("NFD", texto)
-    texto = "".join(c for c in texto if unicodedata.category(c) != "Mn")
-    return texto.strip()
+    txt = txt.upper()
+    txt = unicodedata.normalize("NFD", txt)
+    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
+    return txt.strip()
 
-def padronizar_exame(exame):
-    e = normalizar(exame)
+def score_busca(termo, nome_tabela):
+    pontos = 0
+    termo_words = termo.split()
+    nome_words = nome_tabela.split()
 
-    if "glicose" in e or "glicemia" in e:
-        return "GLICOSE"
+    for w in termo_words:
+        if w in nome_words:
+            pontos += 2
 
-    if "ressonancia" in e:
-        return "RESSONANCIA"
+    for w in termo_words:
+        if w in nome_tabela:
+            pontos += 1
 
-    if e.startswith("tc") or "tomografia" in e:
-        return "TOMOGRAFIA"
+    return pontos
 
-    if e.startswith("us") or "ultrassom" in e or "ultrasonografia" in e:
-        return "ULTRASSONOGRAFIA"
+st.title("🏥 Orçamento Saúde Dirceu")
 
-    return exame.upper()
+clinica = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
+exames_raw = st.text_area("Cole os exames:")
 
-def buscar_preco(df, exame_padrao):
-    df["exame_norm"] = df["EXAME"].apply(normalizar)
+if st.button("✨ GERAR ORÇAMENTO"):
+    url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
+    df = pd.read_csv(url, dtype=str).fillna("")
+    df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
-    if exame_padrao == "RESSONANCIA":
-        filtro = df[df["exame_norm"].str.contains("ressonancia")]
-    elif exame_padrao == "TOMOGRAFIA":
-        filtro = df[df["exame_norm"].str.contains("tomografia")]
-    elif exame_padrao == "ULTRASSONOGRAFIA":
-        filtro = df[df["exame_norm"].str.contains("ultrassom")]
-    elif exame_padrao == "GLICOSE":
-        filtro = df[df["exame_norm"].str.contains("glicose")]
-    else:
-        filtro = df[df["exame_norm"].str.contains(normalizar(exame_padrao))]
+    linhas = re.split(r"\n|,|;", exames_raw)
+    total = 0
+    texto = f"*Orçamento Saúde Dirceu ({'S' if clinica=='Sabry' else 'L'})*\n\n"
 
-    if filtro.empty:
-        return None
+    for linha in linhas:
+        original = linha.strip()
+        if not original:
+            continue
 
-    return float(filtro.iloc[0]["VALOR"])
+        termo = purificar(original)
 
-# ---------- UPLOAD ----------
-st.subheader("Selecione a tabela")
-arquivo = st.file_uploader("Envie a tabela CSV", type=["csv"])
+        # sinônimos simples
+        if termo in ["GLICEMIA", "GLICOSE"]:
+            termo = "GLICOSE"
 
-if arquivo:
-    df = pd.read_csv(arquivo)
+        melhor_pontuacao = 0
+        melhor_linha = None
 
-    entrada = st.text_area(
-        "Digite os exames (um por linha)",
-        placeholder="Ex:\nressonancia\ntc\nglicemia"
+        for _, row in df.iterrows():
+            pontos = score_busca(termo, row["NOME_PURIFICADO"])
+            if pontos > melhor_pontuacao:
+                melhor_pontuacao = pontos
+                melhor_linha = row
+
+        if melhor_linha is not None and melhor_pontuacao > 0:
+            nome = melhor_linha.iloc[0]
+            p = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
+            preco = float(re.findall(r"\d+\.\d+|\d+", p)[0])
+            total += preco
+            texto += f"✅ {nome}: R$ {preco:.2f}\n"
+        else:
+            texto += f"❌ {original}: não encontrado\n"
+
+    texto += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
+
+    st.code(texto)
+
+    st.markdown(
+        f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" '
+        f'style="background:#25D366;color:white;padding:15px;border-radius:10px;'
+        f'display:block;text-align:center;font-weight:bold;text-decoration:none;">'
+        f'📲 ENVIAR PARA WHATSAPP</a>',
+        unsafe_allow_html=True
     )
-
-    if st.button("Gerar orçamento"):
-        exames = [e for e in entrada.split("\n") if e.strip()]
-        total = 0.0
-
-        st.markdown("### Orçamento")
-
-        for exame in exames:
-            exame_padrao = padronizar_exame(exame)
-            preco = buscar_preco(df, exame_padrao)
-
-            if preco is None:
-                st.write(f"❌ {exame}: não encontrado")
-            else:
-                st.write(f"✅ {exame_padrao}: R$ {preco:.2f}")
-                total += preco
-
-        st.markdown(f"### 💰 Total: R$ {total:.2f}")
