@@ -4,61 +4,20 @@ import unicodedata
 import re
 from urllib.parse import quote
 
-# Tenta importar rapidfuzz, se não existir, avisa o usuário de forma amigável
-try:
-    from rapidfuzz import process, fuzz
-    HAS_RAPIDFUZZ = True
-except ImportError:
-    HAS_RAPIDFUZZ = False
-
 # Configuração da página
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
-# --- DICIONÁRIO DE SINÔNIMOS ---
-SINONIMOS = {
-    "RM": "RESSONANCIA",
-    "TC": "TOMOGRAFIA",
-    "RX": "RAIO X",
-    "US": "ULTRASSONOGRAFIA",
-    "ULTRAS": "ULTRASSONOGRAFIA",
-    "ULTRA": "ULTRASSONOGRAFIA",
-    "ECO": "ECOCARDIOGRAMA",
-    "HEMOGRAMA": "SANGUE",
-    "SANGUE": "HEMOGRAMA",
-    "URINA": "EAS",
-    "FEZES": "PARASITOLOGICO",
-    "ABD": "ABDOME",
-    "ABD TOTAL": "ABDOME TOTAL",
-    "SUPRA": "SUPRARENAL",
-}
-
 def purificar(txt):
-    """Remove acentos, converte para maiúsculas e limpa espaços."""
     if not isinstance(txt, str): return ""
+    txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    return txt.upper().strip()
-
-def expandir_sinonimos(termo):
-    """Expande o termo de busca com sinônimos conhecidos."""
-    palavras = termo.split()
-    resultado = []
-    for p in palavras:
-        resultado.append(p)
-        if p in SINONIMOS:
-            resultado.append(SINONIMOS[p])
-    return " ".join(resultado)
+    return txt.strip()
 
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
 st.title("🏥 Orçamento Saúde Dirceu")
-
-# Verificação de dependência
-if not HAS_RAPIDFUZZ:
-    st.error("⚠️ A biblioteca 'rapidfuzz' não foi encontrada.")
-    st.info("Para corrigir, adicione 'rapidfuzz' ao seu arquivo requirements.txt no GitHub ou execute 'pip install rapidfuzz' no seu terminal.")
-    st.stop()
 
 # --- BOTÃO NOVO ORÇAMENTO ---
 if st.button("🔄 NOVO ORÇAMENTO"):
@@ -73,11 +32,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
         try:
             url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
             df = pd.read_csv(url, dtype=str).fillna("")
-            
-            # Criar coluna purificada para busca
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
-            # Separar os exames inseridos
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
             total = 0.0
             texto = f"*Orçamento Saúde Dirceu ({'S' if clinica=='Sabry' else 'L'})*\n\n"
@@ -85,53 +41,59 @@ if st.button("✨ GERAR ORÇAMENTO"):
             for linha in linhas:
                 original = linha.strip()
                 if not original: continue
-                
-                termo_limpo = purificar(original)
-                termo_expandido = expandir_sinonimos(termo_limpo)
+                termo = purificar(original)
 
                 nome_exame = None
                 preco = 0.0
 
-                # --- BUSCA INTELIGENTE ---
-                categorias = ["RESSONANCIA", "TOMOGRAFIA", "RAIO X", "ULTRASSONOGRAFIA"]
-                cat_presente = next((c for c in categorias if c in termo_expandido), None)
-                
-                df_filtrado = df
-                if cat_presente:
-                    df_filtrado = df[df["NOME_PURIFICADO"].str.contains(cat_presente)]
-                
-                if df_filtrado.empty: df_filtrado = df
-                
-                lista_busca = df_filtrado["NOME_PURIFICADO"].tolist()
-                indices_originais = df_filtrado.index.tolist()
+                # --- 1. REGRA DE IMAGEM (ESPELHO + VALORES FIXOS) ---
+                is_rm = "RESSONANCIA" in termo or termo.startswith("RM") or " RM " in f" {termo} "
+                is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC") or " TC " in f" {termo} "
+                is_rx = "RAIO X" in termo or termo.startswith("RX") or " RX " in f" {termo} "
+                is_us = "ULTRAS" in termo or termo.startswith("US") or " US " in f" {termo} "
+                tem_angio_no_pedido = "ANGIO" in termo
 
-                resultado = process.extractOne(
-                    termo_expandido, 
-                    lista_busca, 
-                    scorer=fuzz.token_sort_ratio
-                )
+                if (is_rm or is_tc or is_rx or is_us) and not tem_angio_no_pedido:
+                    nome_exame = original.upper()
+                    if is_rm:
+                        preco = 545.00
+                    elif is_tc:
+                        preco = 165.00
+                    else:
+                        # Busca valor base na tabela (bloqueando Angio)
+                        cat = "RAIO X" if is_rx else "ULTRAS"
+                        match_img = df[df["NOME_PURIFICADO"].str.contains(cat) & ~df["NOME_PURIFICADO"].str.contains("ANGIO")]
+                        if not match_img.empty:
+                            p_raw = match_img.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
+                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
                 
-                if resultado and resultado[1] < 75:
-                    resultado_flex = process.extractOne(
-                        termo_expandido, 
-                        lista_busca, 
-                        scorer=fuzz.token_set_ratio
-                    )
-                    if resultado_flex and resultado_flex[1] > resultado[1]:
-                        resultado = resultado_flex
-
-                if resultado and resultado[1] >= 60:
-                    indice_real = indices_originais[resultado[2]]
-                    melhor_linha = df.loc[indice_real]
-                    nome_exame = melhor_linha.iloc[0]
+                # --- 2. BUSCA NORMAL (LABORATÓRIO OU ANGIO SOLICITADA) ---
+                if nome_exame is None:
+                    # Se não escreveu ANGIO, removemos as Angios da busca da planilha
+                    df_busca = df if tem_angio_no_pedido else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
                     
-                    # Processamento do preço
-                    p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
-                    match_preco = re.findall(r"\d+\.\d+|\d+", p_raw)
-                    if match_preco:
-                        preco = float(match_preco[0])
+                    melhor_pontuacao = -1
+                    melhor_linha = None
 
-                # --- MONTAGEM DO TEXTO ---
+                    for _, row in df_busca.iterrows():
+                        pontos = 0
+                        t_words = termo.split()
+                        n_words = row["NOME_PURIFICADO"].split()
+                        
+                        for w in t_words:
+                            if w in n_words: pontos += 10
+                            elif w in row["NOME_PURIFICADO"]: pontos += 2
+                        
+                        if pontos > melhor_pontuacao and pontos > 0:
+                            melhor_pontuacao = pontos
+                            melhor_linha = row
+                    
+                    if melhor_linha is not None:
+                        nome_exame = melhor_linha.iloc[0]
+                        p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
+                        preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+
+                # --- 3. MONTAGEM DO RESULTADO ---
                 if nome_exame:
                     total += preco
                     texto += f"✅ {nome_exame}: R$ {preco:.2f}\n"
@@ -139,13 +101,10 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     texto += f"❌ {original}: não encontrado\n"
 
             texto += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
-            
             st.code(texto)
             st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro ao processar: {e}")
+            st.error(f"Erro: {e}")
     else:
-        st.warning("Por favor, cole os exames antes de gerar o orçamento.")
-
-st.caption("v7.1 - Busca Inteligente (Fuzzy) + Sinônimos")
+        st.warning("Cole os exames.")
