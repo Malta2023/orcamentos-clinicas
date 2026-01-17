@@ -22,20 +22,21 @@ if st.button("🔄 NOVO ORÇAMENTO"):
     st.cache_data.clear()
     st.rerun()
 
-clinica = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
+clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
 exames_raw = st.text_area("Cole os exames (um por linha ou separados por vírgula):", height=150)
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
-            # GARANTE QUE APENAS A PLANILHA SELECIONADA SEJA CONSULTADA
-            url = URL_SABRY if clinica == "Sabry" else URL_LABCLINICA
+            # LIMPEZA DE MEMÓRIA: Força a leitura apenas da URL selecionada
+            url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
             df = pd.read_csv(url, dtype=str).fillna("")
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
             total = 0.0
-            texto = f"*Orçamento Saúde Dirceu ({'S' if clinica=='Sabry' else 'L'})*\n\n"
+            sigla = 'S' if clinica_selecionada == "Sabry" else 'L'
+            texto = f"*Orçamento Saúde Dirceu ({sigla})*\n\n"
 
             for linha in linhas:
                 original = linha.strip()
@@ -44,18 +45,28 @@ if st.button("✨ GERAR ORÇAMENTO"):
 
                 nome_exame = None
                 preco = 0.0
+                nao_disponivel = False
 
-                # --- 1. REGRA PARA TSH (NOMENCLATURA SIMPLES) ---
-                if termo == "TSH":
-                    nome_exame = "TSH"
-                    match_tsh = df[df["NOME_PURIFICADO"].str.contains("TSH", na=False)]
+                # --- 1. TRAVA DE CATEGORIA: LABCLINICA NÃO TEM IMAGEM PESADA ---
+                is_imagem_pesada = "RESSONANCIA" in termo or termo.startswith("RM") or "TOMOGRAFIA" in termo or termo.startswith("TC")
+                
+                if clinica_selecionada == "Labclinica" and is_imagem_pesada:
+                    nao_disponivel = True
+                    motivo = "Exame de imagem não disponível na Labclinica"
+                
+                # --- 2. REGRA DO TSH (Nomenclatura exata) ---
+                elif termo == "TSH":
+                    match_tsh = df[df["NOME_PURIFICADO"] == "TSH"]
+                    if match_tsh.empty:
+                        match_tsh = df[df["NOME_PURIFICADO"].str.contains("TSH", na=False)]
+                    
                     if not match_tsh.empty:
-                        # Pega o primeiro valor de TSH que encontrar na tabela selecionada
+                        nome_exame = "TSH"
                         p_raw = match_tsh.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
                         preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
-                
-                # --- 2. REGRA DE IMAGEM (RM, TC, RX, US) ---
-                if nome_exame is None:
+
+                # --- 3. REGRA DO ESPELHO PARA IMAGEM (RM, TC, RX, US) - SÓ PARA SABRY ---
+                if nome_exame is None and not nao_disponivel:
                     is_rm = "RESSONANCIA" in termo or termo.startswith("RM") or " RM " in f" {termo} "
                     is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC") or " TC " in f" {termo} "
                     is_rx = "RAIO X" in termo or termo.startswith("RX") or " RX " in f" {termo} "
@@ -64,22 +75,19 @@ if st.button("✨ GERAR ORÇAMENTO"):
 
                     if (is_rm or is_tc or is_rx or is_us) and not tem_angio:
                         nome_exame = original.upper()
-                        if is_rm: preco = 545.00
-                        elif is_tc: preco = 165.00
-                        else:
-                            cat = "RAIO X" if is_rx else "ULTRAS"
-                            match_img = df[df["NOME_PURIFICADO"].str.contains(cat) & ~df["NOME_PURIFICADO"].str.contains("ANGIO")]
-                            if not match_img.empty:
-                                p_raw = match_img.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
-                                preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                        cat = "RESSONANCIA" if is_rm else "TOMOGRAFIA" if is_tc else "RAIO X" if is_rx else "ULTRAS"
+                        
+                        match_img = df[df["NOME_PURIFICADO"].str.contains(cat) & ~df["NOME_PURIFICADO"].str.contains("ANGIO")]
+                        if not match_img.empty:
+                            p_raw = match_img.iloc[0, 1].replace("R$", "").replace(".", "").replace(",", ".")
+                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
 
-                # --- 3. BUSCA GERAL (LABORATÓRIO) ---
-                if nome_exame is None:
-                    # Filtra para não trazer Angio se não foi pedido
+                # --- 4. BUSCA GERAL (LABORATÓRIO) ---
+                if nome_exame is None and not nao_disponivel:
                     df_busca = df if "ANGIO" in termo else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
-                    
                     melhor_pontuacao = -1
                     melhor_linha = None
+                    
                     for _, row in df_busca.iterrows():
                         pontos = 0
                         t_words = termo.split()
@@ -98,7 +106,9 @@ if st.button("✨ GERAR ORÇAMENTO"):
                         preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
 
                 # --- MONTAGEM DO RESULTADO ---
-                if nome_exame:
+                if nao_disponivel:
+                    texto += f"⚠️ {original}: (Não disponível nesta clínica)\n"
+                elif nome_exame:
                     total += preco
                     texto += f"✅ {nome_exame}: R$ {preco:.2f}\n"
                 else:
