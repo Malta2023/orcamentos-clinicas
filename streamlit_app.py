@@ -11,14 +11,17 @@ def purificar(txt):
     txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    # Mantém letras e números, mas NÃO remove espaços
+    txt = re.sub(r"[^A-Z0-9]", " ", txt)
     return " ".join(txt.split()).strip()
 
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# Mapa de Sinônimos Direto
+# TRADUTOR DE ENTRADA
 MAPA_SINONIMOS = {
+    "BILIRRUBINA": "BILIRRUBINA",
+    "BILIRRUBINAS": "BILIRRUBINA",
+    "GAMA GT": "GAMA",
     "EAS": "SUMARIO DE URINA",
     "SUMARIO URINA": "SUMARIO DE URINA",
     "CHLAMYDIA": "CLAMIDEA",
@@ -65,27 +68,28 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 if not original: continue
                 
                 termo = purificar(original)
-                # Traduz sinônimo se existir
+                
+                # Pega a primeira palavra para uma busca mais "agressiva" se falhar
+                primeira_palavra = termo.split()[0] if termo else ""
                 busca = MAPA_SINONIMOS.get(termo, termo)
 
-                # --- BUSCA EM CASCATA ---
+                match = pd.DataFrame()
+                
                 # 1. Busca Exata
                 match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # 2. Busca por "Contém" (Flexível)
+                # 2. Busca por Contém (termo completo)
                 if match.empty:
                     match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
                 
-                # 3. Busca por Palavras (Para Sumário Urina -> Sumário de Urina)
-                if match.empty and " " in busca:
-                    palavras = busca.split()
-                    match = df[df["NOME_PURIFICADO"].apply(lambda x: all(p in str(x) for p in palavras))]
+                # 3. Busca pela Primeira Palavra (Caso de Bilirrubinas/Gama)
+                if match.empty and len(primeira_palavra) > 3:
+                    match = df[df["NOME_PURIFICADO"].str.contains(primeira_palavra, na=False)]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
-                    # Pega o resultado mais curto para ser mais certeiro
                     match = match.copy()
                     match["len"] = match["NOME_PURIFICADO"].apply(len)
                     res = match.sort_values("len").iloc[0]
