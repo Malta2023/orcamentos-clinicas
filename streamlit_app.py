@@ -13,24 +13,19 @@ def purificar(txt):
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
     return txt.strip()
 
-# LINKS DOS ARQUIVOS SEPARADOS
+# LINKS DOS ARQUIVOS
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# --- DICIONÁRIO DE SIGLAS E REGRAS (MEMORIZADO) ---
+# --- DICIONÁRIO DE SIGLAS MEMORIZADO ---
 SINONIMOS = {
     "TGO": "TRANSAMINASE OXALACETICA",
     "AST": "TRANSAMINASE OXALACETICA",
     "TGP": "TRANSAMINASE PIRUVICA",
     "ALT": "TRANSAMINASE PIRUVICA",
-    "SUMARIO URINA": "SUMARIO DE URINA",
-    "SUMARIO DE URINA": "SUMARIO DE URINA",
     "EAS": "SUMARIO DE URINA",
-    "URINA TIPO 1": "SUMARIO DE URINA",
-    "BILIRRUBINA": "BILIRRUBINAS",
-    "MICROALBUMINURIA": "MICROALBUMINURIA",
-    "GLICEMIA": "GLICOSE",
-    "HEMOGRAMA": "HEMOGRAMA"
+    "SUMARIO DE URINA": "SUMARIO DE URINA",
+    "GLICEMIA": "GLICOSE"
 }
 
 if "exames_texto" not in st.session_state:
@@ -57,49 +52,37 @@ if st.button("✨ GERAR ORÇAMENTO"):
 
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
             total = 0.0
-            sigla = 'S' if clinica_selecionada == "Sabry" else 'L'
-            texto = f"*Orçamento Saúde Dirceu ({sigla})*\n\n"
+            sigla_clinica = 'S' if clinica_selecionada == "Sabry" else 'L'
+            texto = f"*Orçamento Saúde Dirceu ({sigla_clinica})*\n\n"
 
             for linha in linhas:
                 original = linha.strip()
                 if not original: continue
                 termo_base = purificar(original)
                 
-                # Aplica substituição por siglas/sinônimos
-                termo_para_busca = termo_base
-                for sigla_key, nome_completo in SINONIMOS.items():
-                    if sigla_key in termo_base:
-                        termo_para_busca = nome_completo
+                # Tradução de Sigla para Nome da Tabela
+                busca = termo_base
+                for sigla, nome in SINONIMOS.items():
+                    if sigla in termo_base:
+                        busca = nome
                         break
 
                 nome_exame = None
                 preco = 0.0
 
-                # 1. REGRAS FIXAS LABCLINICA (TSH, GLICOSE, CREATININA)
-                if clinica_selecionada == "Labclinica":
-                    if "TSH" == termo_base: nome_exame = "TSH"; preco = 12.24
-                    elif "GLICOSE" in termo_para_busca: nome_exame = "GLICOSE"; preco = 6.53
-                    elif "CREATININA" == termo_base: nome_exame = "CREATININA"; preco = 6.53
-
-                # 2. REGRAS DE IMAGEM SABRY
-                if nome_exame is None and clinica_selecionada == "Sabry":
-                    if termo_base.startswith("RM") or "RESSONANCIA" in termo_base:
-                        nome_exame = original.upper(); preco = 545.00
-                    elif termo_base.startswith("TC") or "TOMOGRAFIA" in termo_base:
-                        nome_exame = original.upper(); preco = 165.00
-
-                # 3. BUSCA ROBUSTA NA TABELA
-                if nome_exame is None:
-                    # A) Tenta encontrar o termo (já convertido pela sigla) na tabela
-                    match = df[df["NOME_PURIFICADO"].str.contains(termo_para_busca, na=False)]
+                # Busca na tabela (Contém o nome ou é exato)
+                match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
+                
+                if not match.empty:
+                    # Pega o resultado mais curto (mais preciso)
+                    melhor_linha = match.sort_values(by=df.columns[0], key=lambda x: x.str.len()).iloc[0]
+                    nome_exame = melhor_linha.iloc[0]
+                    # Extração de preço na coluna correta (ex: Ganho com 40%)
+                    col_preco = melhor_linha.filter(like='40%').iloc[0] if clinica_selecionada == "Sabry" else melhor_linha.iloc[1]
                     
-                    if not match.empty:
-                        # Pega o que tem o nome mais curto para ser preciso
-                        melhor_linha = match.sort_values(by=df.columns[0], key=lambda x: x.str.len()).iloc[0]
-                        nome_exame = melhor_linha.iloc[0]
-                        p_raw = str(melhor_linha.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
-                        res = re.findall(r"\d+\.\d+|\d+", p_raw)
-                        if res: preco = float(res[0])
+                    p_str = str(col_preco).replace("R$", "").replace(".", "").replace(",", ".")
+                    valores = re.findall(r"\d+\.\d+|\d+", p_str)
+                    if valores: preco = float(valores[0])
 
                 if nome_exame:
                     total += preco
@@ -112,4 +95,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
             st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro ao processar: {e}")
