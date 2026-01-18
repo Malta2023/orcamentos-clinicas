@@ -17,17 +17,19 @@ def purificar(txt):
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# Dicionário de Segurança (mesmo que você mude a tabela, ele ajuda se você esquecer algo)
+# DICIONÁRIO DE SINÔNIMOS AMPLIADO
 SINONIMOS = {
     "EAS": "SUMARIO DE URINA",
-    "GLICEMIA": "GLICOSE"
+    "GLICEMIA": "GLICOSE",
+    "CHLAMYDIA": "CLAMIDEA",
+    "CLAMIDEA": "CLAMIDEA"
 }
 
 if "exames_texto" not in st.session_state:
     st.session_state.exames_texto = ""
 
 def acao_limpar():
-    st.cache_data.clear() # Limpa a memória para forçar a leitura da tabela nova
+    st.cache_data.clear()
     st.session_state.exames_texto = ""
 
 st.title("🏥 Orçamento Saúde Dirceu")
@@ -38,8 +40,7 @@ if st.button("🔄 NOVO ORÇAMENTO / ATUALIZAR TABELAS", on_click=acao_limpar):
 clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
 exames_raw = st.text_area("Cole os exames:", height=150, key="exames_texto")
 
-# Função para carregar dados com "limpeza de cache" automática
-@st.cache_data(ttl=60) # Atualiza a cada 60 segundos automaticamente
+@st.cache_data(ttl=60)
 def carregar_dados(url):
     return pd.read_csv(url, on_bad_lines='skip').fillna("")
 
@@ -64,13 +65,13 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # Busca o que estiver na tabela (agora priorizando a sua simplificação)
+                # Busca o que estiver na tabela (priorizando a sua simplificação)
                 match = df[df["NOME_PURIFICADO"].str.contains(termo_base, na=False)]
                 
                 # Se não achou, tenta pelo sinônimo
                 if match.empty:
                     for sigla, nome in SINONIMOS.items():
-                        if sigla == termo_base:
+                        if sigla in termo_base:
                             match = df[df["NOME_PURIFICADO"].str.contains(nome, na=False)]
                             break
 
@@ -83,7 +84,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     valores = re.findall(r"\d+\.\d+|\d+", p_raw)
                     if valores: preco = float(valores[0])
 
-                # Regras de Imagem permanecem como segurança
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     if termo_base.startswith("RM") or "RESSONANCIA" in termo_base:
                         nome_exame = original.upper(); preco = 545.00
