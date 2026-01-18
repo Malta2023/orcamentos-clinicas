@@ -14,9 +14,9 @@ def purificar(txt):
     if txt == "GLICEMIA": txt = "GLICOSE"
     return txt.strip()
 
-# LINKS DOS ARQUIVOS SEPARADOS (DIRETO DAS SUAS NOVAS PLANILHAS)
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/gviz/tq?tqx=out:csv"
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/gviz/tq?tqx=out:csv"
+# LINKS DOS ARQUIVOS SEPARADOS (FORMATO EXPORT CSV)
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
 if "exames_texto" not in st.session_state:
     st.session_state.exames_texto = ""
@@ -37,7 +37,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
             url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
-            df = pd.read_csv(url).fillna("")
+            # Carregamento com tratamento de erro de conexão
+            df = pd.read_csv(url, on_bad_lines='skip').fillna("")
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
@@ -66,26 +67,27 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     elif termo.startswith("TC") or "TOMOGRAFIA" in termo:
                         nome_exame = original.upper(); preco = 165.00
 
-                # 3. BUSCA SIMPLIFICADA E SEGURA
+                # 3. BUSCA ROBUSTA
                 if nome_exame is None:
-                    # Passo A: Tenta encontrar o nome EXATO
+                    # Tenta Match Exato
                     match_exato = df[df["NOME_PURIFICADO"] == termo]
                     
                     if not match_exato.empty:
                         melhor_linha = match_exato.iloc[0]
                     else:
-                        # Passo B: Se não achar exato, vê se o que você digitou ESTÁ DENTRO de algum nome
-                        # Mas só faz isso se você digitou algo com mais de 3 letras
-                        if len(termo) > 3:
-                            # Filtra a tabela: só quem contém o texto digitado
-                            possiveis = df[df["NOME_PURIFICADO"].str.contains(termo)]
-                            if not possiveis.empty:
-                                # Pega o nome mais curto que contém a palavra (evita pegar nomes gigantes)
-                                melhor_linha = possiveis.sort_values(by=df.columns[0], key=lambda x: x.str.len()).iloc[0]
-                            else:
-                                melhor_linha = None
+                        # Busca se o termo está contido (ex: "HEMOGRAMA" em "HEMOGRAMA COMPLETO")
+                        possiveis = df[df["NOME_PURIFICADO"].str.contains(termo, na=False)]
+                        if not possiveis.empty:
+                            # Pega o mais curto para evitar erros
+                            melhor_linha = possiveis.sort_values(by=df.columns[0], key=lambda x: x.str.len()).iloc[0]
                         else:
+                            # Tentativa final: vê se o nome da planilha está contido no que você digitou
+                            # Inverte a lógica para cobrir casos de digitação extra
                             melhor_linha = None
+                            for _, row in df.iterrows():
+                                if row["NOME_PURIFICADO"] in termo and len(row["NOME_PURIFICADO"]) > 3:
+                                    melhor_linha = row
+                                    break
                     
                     if melhor_linha is not None:
                         nome_exame = melhor_linha.iloc[0]
@@ -104,4 +106,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
             st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro de conexão com a planilha: {e}")
