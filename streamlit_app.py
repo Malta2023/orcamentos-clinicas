@@ -9,25 +9,22 @@ st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 def purificar(txt):
     if not isinstance(txt, str): return ""
     txt = txt.upper()
-    # Remove acentos
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    # REMOVE TUDO QUE NÃO É LETRA OU NÚMERO (limpeza total)
-    txt = re.sub(r"[^A-Z0-9]", "", txt) 
-    return txt.strip()
+    # Mantém letras e números, mas NÃO remove espaços
+    return " ".join(txt.split()).strip()
 
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# Sinônimos de entrada (Se o usuário digitar um, o sistema aceita o outro)
-MAPA_ENTRADA = {
+# Mapa de Sinônimos Direto
+MAPA_SINONIMOS = {
+    "EAS": "SUMARIO DE URINA",
+    "SUMARIO URINA": "SUMARIO DE URINA",
     "CHLAMYDIA": "CLAMIDEA",
-    "GLICEMIA": "GLICOSE",
-    "EAS": "SUMARIOURINA",
-    "TGO": "TGO",
     "AST": "TGO",
-    "TGP": "TGP",
-    "ALT": "TGP"
+    "ALT": "TGP",
+    "GLICEMIA": "GLICOSE"
 }
 
 if "exames_texto" not in st.session_state:
@@ -39,7 +36,7 @@ def acao_limpar():
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
-if st.button("🔄 ATUALIZAR / NOVO", on_click=acao_limpar):
+if st.button("🔄 ATUALIZAR TABELAS", on_click=acao_limpar):
     st.rerun()
 
 clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
@@ -49,7 +46,6 @@ exames_raw = st.text_area("Cole os exames:", height=150, key="exames_texto")
 def carregar_dados(url):
     df = pd.read_csv(url, on_bad_lines='skip').fillna("")
     df["NOME_ORIGINAL"] = df.iloc[:, 0].astype(str)
-    # A purificação aqui agora é agressiva: remove espaços e símbolos
     df["NOME_PURIFICADO"] = df["NOME_ORIGINAL"].apply(purificar)
     return df
 
@@ -68,34 +64,42 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = linha.strip()
                 if not original: continue
                 
-                # Purifica o que o usuário digitou (ex: "TGO " vira "TGO")
-                busca_limpa = purificar(original)
-                busca_final = MAPA_ENTRADA.get(busca_limpa, busca_limpa)
+                termo = purificar(original)
+                # Traduz sinônimo se existir
+                busca = MAPA_SINONIMOS.get(termo, termo)
 
-                # Busca na tabela purificada (sem espaços, sem pontos)
-                match = df[df["NOME_PURIFICADO"] == busca_final]
+                # --- BUSCA EM CASCATA ---
+                # 1. Busca Exata
+                match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # Se não achou exato, tenta "contém" (flexível)
+                # 2. Busca por "Contém" (Flexível)
                 if match.empty:
-                    match = df[df["NOME_PURIFICADO"].str.contains(busca_final, na=False)]
+                    match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
+                
+                # 3. Busca por Palavras (Para Sumário Urina -> Sumário de Urina)
+                if match.empty and " " in busca:
+                    palavras = busca.split()
+                    match = df[df["NOME_PURIFICADO"].apply(lambda x: all(p in str(x) for p in palavras))]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
-                    res = match.iloc[0] # Pega a primeira ocorrência
+                    # Pega o resultado mais curto para ser mais certeiro
+                    match = match.copy()
+                    match["len"] = match["NOME_PURIFICADO"].apply(len)
+                    res = match.sort_values("len").iloc[0]
                     nome_exame = res["NOME_ORIGINAL"]
                     
                     p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                     valores = re.findall(r"\d+\.\d+|\d+", p_raw)
                     if valores: preco = float(valores[0])
 
-                # Regras de Imagem Sabry
+                # Regra de Imagem (Sabry)
                 if nome_exame is None and clinica_selecionada == "Sabry":
-                    if "RESSONANCIA" in busca_limpa or busca_limpa.startswith("RM"):
-                        nome_exame = original.upper(); preco = 545.00
-                    elif "TOMOGRAFIA" in busca_limpa or busca_limpa.startswith("TC"):
-                        nome_exame = original.upper(); preco = 165.00
+                    if any(x in termo for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
+                        nome_exame = original.upper()
+                        preco = 545.00 if "RM" in termo or "RESSONANCIA" in termo else 165.00
 
                 if nome_exame:
                     total += preco
