@@ -4,6 +4,7 @@ import unicodedata
 import re
 from urllib.parse import quote
 
+# Configuração da Página
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
 def purificar(txt):
@@ -11,10 +12,13 @@ def purificar(txt):
     txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
+    # Regra: GLICEMIA = GLICOSE
+    if txt == "GLICEMIA": txt = "GLICOSE"
     return txt.strip()
 
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
+# NOVOS LINKS DA PLANILHA ATUALIZADA (Orçamento rapido App)
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE/export?format=csv&gid=1156828551"
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE/export?format=csv&gid=0"
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
@@ -56,7 +60,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     elif termo == "TSH":
                         nome_exame = "TSH"
                         preco = 12.24
-                    elif termo in ["GLICOSE", "GLICEMIA"]:
+                    elif termo == "GLICOSE":
                         nome_exame = "GLICOSE"
                         preco = 6.53
 
@@ -93,7 +97,10 @@ if st.button("✨ GERAR ORÇAMENTO"):
                         if melhor_linha is not None:
                             nome_exame = melhor_linha.iloc[0]
                             p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
-                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                            try:
+                                preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                            except:
+                                preco = 0.0
 
                 if nome_exame:
                     total += preco
@@ -106,4 +113,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
             st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro ao processar: {e}")
