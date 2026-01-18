@@ -15,17 +15,14 @@ def purificar(txt):
     if txt == "GLICEMIA": txt = "GLICOSE"
     return txt.strip()
 
-# Identificador da Planilha Única
 ID_PLANILHA = "1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE"
 
-# FUNÇÃO PARA LIMPAR TUDO
-if "limpar" not in st.session_state:
-    st.session_state.limpar = False
+if "exames_texto" not in st.session_state:
+    st.session_state.exames_texto = ""
 
 def acao_limpar():
     st.cache_data.clear()
-    st.session_state.exames_texto = "" # Limpa a área de texto
-    st.session_state.limpar = True
+    st.session_state.exames_texto = ""
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
@@ -33,20 +30,15 @@ if st.button("🔄 NOVO ORÇAMENTO", on_click=acao_limpar):
     st.rerun()
 
 clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
-
-# Campo de texto vinculado ao estado de limpeza
 exames_raw = st.text_area("Cole os exames:", height=150, key="exames_texto")
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
-            # GARANTIA DE CONSULTA ÚNICA: Define o link APENAS da clínica escolhida
-            if clinica_selecionada == "Sabry":
-                url_consulta = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/gviz/tq?tqx=out:csv&gid=1156828551"
-            else:
-                url_consulta = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/gviz/tq?tqx=out:csv&gid=0"
+            # Garante que lê apenas a aba da clínica selecionada
+            gid = "1156828551" if clinica_selecionada == "Sabry" else "0"
+            url_consulta = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/gviz/tq?tqx=out:csv&gid={gid}"
             
-            # Carrega APENAS a tabela da clínica selecionada
             df = pd.read_csv(url_consulta).fillna("")
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
@@ -62,7 +54,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRAS FIXAS (PRIORIDADE TOTAL) ---
+                # --- 1. REGRAS FIXAS LABCLINICA (PRIORIDADE 1) ---
                 if clinica_selecionada == "Labclinica":
                     if termo == "TSH":
                         nome_exame = "TSH"; preco = 12.24
@@ -73,7 +65,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     elif "CLEARENCE" in termo and "CREATININA" in termo:
                         nome_exame = "CLEARENCE DE CREATININA"; preco = 8.16
 
-                # --- 2. REGRA DE IMAGEM (APENAS SABRY) ---
+                # --- 2. REGRA DE IMAGEM SABRY (PRIORIDADE 2) ---
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     is_rm = "RESSONANCIA" in termo or termo.startswith("RM")
                     is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC")
@@ -81,29 +73,37 @@ if st.button("✨ GERAR ORÇAMENTO"):
                         nome_exame = original.upper()
                         preco = 545.00 if is_rm else 165.00
 
-                # --- 3. BUSCA NA TABELA DA CLÍNICA SELECIONADA ---
+                # --- 3. BUSCA INTELIGENTE NA PLANILHA (PRIORIDADE 3) ---
                 if nome_exame is None:
-                    # Filtro extra para não misturar Angio
-                    df_filtrado = df if "ANGIO" in termo else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
+                    # Tenta primeiro encontrar o nome EXATAMENTE IGUAL ao que foi digitado
+                    match_exato = df[df["NOME_PURIFICADO"] == termo]
                     
-                    melhor_pontuacao = -1
-                    melhor_linha = None
-                    
-                    for _, row in df_filtrado.iterrows():
-                        pontos = 0
-                        t_words = termo.split()
-                        n_words = row["NOME_PURIFICADO"].split()
+                    if not match_exato.empty:
+                        melhor_linha = match_exato.iloc[0]
+                    else:
+                        # Se não achar exato, busca o que mais se parece, 
+                        # mas ignora nomes muito longos se o termo for curto
+                        df_filtrado = df if "ANGIO" in termo else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
+                        melhor_pontuacao = -1
+                        melhor_linha = None
                         
-                        if termo == row["NOME_PURIFICADO"]:
-                            pontos = 100 # Match exato tem prioridade
-                        else:
+                        for _, row in df_filtrado.iterrows():
+                            pontos = 0
+                            t_words = termo.split()
+                            n_words = row["NOME_PURIFICADO"].split()
+                            
+                            # Pontua se as palavras batem
                             for w in t_words:
-                                if w in n_words: pontos += 10
-                                elif w in row["NOME_PURIFICADO"]: pontos += 2
-                        
-                        if pontos > melhor_pontuacao and pontos > 0:
-                            melhor_pontuacao = pontos
-                            melhor_linha = row
+                                if w in n_words: pontos += 20
+                            
+                            # Penaliza se o nome na planilha for muito maior que o pedido
+                            # Isso evita que "Hemoglobina" vire "Eletroforese de Hemoglobina"
+                            diferenca_tamanho = len(row["NOME_PURIFICADO"]) - len(termo)
+                            pontos -= diferenca_tamanho * 0.5 
+                            
+                            if pontos > melhor_pontuacao and pontos > 0:
+                                melhor_pontuacao = pontos
+                                melhor_linha = row
                     
                     if melhor_linha is not None:
                         nome_exame = melhor_linha.iloc[0]
