@@ -15,14 +15,11 @@ def purificar(txt):
     if txt == "GLICEMIA": txt = "GLICOSE"
     return txt.strip()
 
-# --- COLOQUE OS LINKS DAS PLANILHAS SEPARADAS AQUI ---
-# Importante: O link deve terminar em /export?format=csv
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE/edit?usp=sharing
-
-"
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE/edit?usp=sharing
-
-"
+# --- LINKS DOS ARQUIVOS SEPARADOS ---
+# Labclinica: 1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk
+# Sabry: 1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/gviz/tq?tqx=out:csv"
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/gviz/tq?tqx=out:csv"
 
 if "exames_texto" not in st.session_state:
     st.session_state.exames_texto = ""
@@ -42,9 +39,10 @@ exames_raw = st.text_area("Cole os exames:", height=150, key="exames_texto")
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
-            # Seleção de URL sem risco de mistura
+            # Seleção de URL sem risco nenhum de mistura
             url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
             
+            # Carrega apenas o arquivo da clínica selecionada
             df = pd.read_csv(url).fillna("")
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
@@ -60,7 +58,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 nome_exame = None
                 preco = 0.0
 
-                # --- 1. REGRAS DE PREÇO FIXO (LABCLINICA) ---
+                # --- 1. REGRAS FIXAS (PRIORIDADE 1 - LABCLINICA) ---
                 if clinica_selecionada == "Labclinica":
                     if termo == "TSH":
                         nome_exame = "TSH"; preco = 12.24
@@ -71,7 +69,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
                     elif "CLEARENCE" in termo and "CREATININA" in termo:
                         nome_exame = "CLEARENCE DE CREATININA"; preco = 8.16
 
-                # --- 2. REGRAS DE IMAGEM (SABRY) ---
+                # --- 2. REGRAS DE IMAGEM (PRIORIDADE 2 - SABRY) ---
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     is_rm = "RESSONANCIA" in termo or termo.startswith("RM")
                     is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC")
@@ -79,16 +77,15 @@ if st.button("✨ GERAR ORÇAMENTO"):
                         nome_exame = original.upper()
                         preco = 545.00 if is_rm else 165.00
 
-                # --- 3. BUSCA COM PRIORIDADE AO NOME CURTO/EXATO ---
+                # --- 3. BUSCA NA TABELA (PRIORIDADE 3) ---
                 if nome_exame is None:
-                    # Tenta match exato primeiro (Ex: Hemoglobina)
+                    # Tenta MATCH EXATO primeiro (Evita confundir Hemoglobina com Eletroforese)
                     match_exato = df[df["NOME_PURIFICADO"] == termo]
                     
                     if not match_exato.empty:
-                        # Se houver mais de um, pega o que tem o nome mais curto
-                        melhor_linha = match_exato.sort_values(by=df.columns[0], key=lambda x: x.str.len()).iloc[0]
+                        melhor_linha = match_exato.iloc[0]
                     else:
-                        # Busca aproximada com trava para não pegar exames longos demais
+                        # Busca aproximada com trava de segurança para nomes longos
                         df_f = df if "ANGIO" in termo else df[~df["NOME_PURIFICADO"].str.contains("ANGIO")]
                         melhor_pontuacao = -1
                         melhor_linha = None
@@ -98,10 +95,10 @@ if st.button("✨ GERAR ORÇAMENTO"):
                             t_words = termo.split()
                             n_words = row["NOME_PURIFICADO"].split()
                             for w in t_words:
-                                if w in n_words: pontos += 20
+                                if w in n_words: pontos += 30 # Aumentei o peso da palavra exata
                             
-                            # Penaliza nomes gigantes (evita Hemoglobina -> Eletroforese de Hemoglobina)
-                            pontos -= (len(row["NOME_PURIFICADO"]) - len(termo)) * 0.8
+                            # Penalidade severa para nomes muito mais longos que o pedido
+                            pontos -= (len(row["NOME_PURIFICADO"]) - len(termo)) * 2.0
                             
                             if pontos > melhor_pontuacao and pontos > 0:
                                 melhor_pontuacao = pontos; melhor_linha = row
@@ -123,4 +120,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
             st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro ao carregar planilha: {e}")
+            st.error(f"Erro ao acessar planilha: {e}")
