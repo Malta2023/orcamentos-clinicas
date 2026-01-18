@@ -7,26 +7,27 @@ from urllib.parse import quote
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
 def purificar(txt):
-    if not isinstance(txt, str): txt = str(txt)
+    if not isinstance(txt, str): return ""
     txt = txt.upper()
+    # Remove acentos
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
+    # REMOVE TUDO QUE NÃO É LETRA OU NÚMERO (limpeza total)
+    txt = re.sub(r"[^A-Z0-9]", "", txt) 
     return txt.strip()
 
-# LINKS
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# MEMÓRIA DE SINÔNIMOS (TGO, TGP, CLAMIDEA, EAS)
-SINONIMOS = {
-    "EAS": "SUMARIO DE URINA",
-    "URINA I": "SUMARIO DE URINA",
-    "GLICEMIA": "GLICOSE",
+# Sinônimos de entrada (Se o usuário digitar um, o sistema aceita o outro)
+MAPA_ENTRADA = {
     "CHLAMYDIA": "CLAMIDEA",
-    "TGO": "TRANSAMINASE OXALACETICA",
-    "TGP": "TRANSAMINASE PIRUVICA",
-    "AST": "TRANSAMINASE OXALACETICA",
-    "ALT": "TRANSAMINASE PIRUVICA"
+    "GLICEMIA": "GLICOSE",
+    "EAS": "SUMARIOURINA",
+    "TGO": "TGO",
+    "AST": "TGO",
+    "TGP": "TGP",
+    "ALT": "TGP"
 }
 
 if "exames_texto" not in st.session_state:
@@ -38,25 +39,27 @@ def acao_limpar():
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
-if st.button("🔄 ATUALIZAR TABELAS", on_click=acao_limpar):
+if st.button("🔄 ATUALIZAR / NOVO", on_click=acao_limpar):
     st.rerun()
 
 clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
 exames_raw = st.text_area("Cole os exames:", height=150, key="exames_texto")
 
-@st.cache_data(ttl=30) # Reduzi para 30 segundos para ser quase tempo real
+@st.cache_data(ttl=5)
 def carregar_dados(url):
-    return pd.read_csv(url, on_bad_lines='skip').fillna("")
+    df = pd.read_csv(url, on_bad_lines='skip').fillna("")
+    df["NOME_ORIGINAL"] = df.iloc[:, 0].astype(str)
+    # A purificação aqui agora é agressiva: remove espaços e símbolos
+    df["NOME_PURIFICADO"] = df["NOME_ORIGINAL"].apply(purificar)
+    return df
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
             url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
             df = carregar_dados(url)
-            df["NOME_ORIGINAL"] = df.iloc[:, 0].astype(str)
-            df["NOME_PURIFICADO"] = df["NOME_ORIGINAL"].apply(purificar)
             
-            linhas = re.split(r"\n|,|;| E | & ", exames_raw)
+            linhas = re.split(r"\n|,|;", exames_raw)
             total = 0.0
             sigla_c = 'S' if clinica_selecionada == "Sabry" else 'L'
             texto_zap = f"*Orçamento Saúde Dirceu ({sigla_c})*\n\n"
@@ -64,41 +67,34 @@ if st.button("✨ GERAR ORÇAMENTO"):
             for linha in linhas:
                 original = linha.strip()
                 if not original: continue
-                termo_base = purificar(original)
                 
-                # Aplica Tradução de Sinônimo
-                for sigla, nome in SINONIMOS.items():
-                    if sigla == termo_base:
-                        termo_base = nome
-                        break
+                # Purifica o que o usuário digitou (ex: "TGO " vira "TGO")
+                busca_limpa = purificar(original)
+                busca_final = MAPA_ENTRADA.get(busca_limpa, busca_limpa)
+
+                # Busca na tabela purificada (sem espaços, sem pontos)
+                match = df[df["NOME_PURIFICADO"] == busca_final]
+                
+                # Se não achou exato, tenta "contém" (flexível)
+                if match.empty:
+                    match = df[df["NOME_PURIFICADO"].str.contains(busca_final, na=False)]
 
                 nome_exame = None
                 preco = 0.0
-                
-                # --- NOVA LÓGICA DE BUSCA POR PALAVRAS ---
-                palavras_busca = termo_base.split()
-                # Filtra a tabela onde TODAS as palavras buscadas aparecem no nome
-                def contem_todas(nome_tab):
-                    return all(p in nome_tab for p in palavras_busca if len(p) > 1)
-
-                match = df[df["NOME_PURIFICADO"].apply(contem_todas)]
 
                 if not match.empty:
-                    # Se houver vários, pega o que tem o nome mais curto
-                    match = match.copy()
-                    match["len_name"] = match["NOME_PURIFICADO"].apply(lambda x: len(str(x)))
-                    melhor_linha = match.sort_values("len_name").iloc[0]
+                    res = match.iloc[0] # Pega a primeira ocorrência
+                    nome_exame = res["NOME_ORIGINAL"]
                     
-                    nome_exame = melhor_linha["NOME_ORIGINAL"]
-                    p_raw = str(melhor_linha.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
+                    p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                     valores = re.findall(r"\d+\.\d+|\d+", p_raw)
                     if valores: preco = float(valores[0])
 
-                # Regra de Segurança para Imagem
+                # Regras de Imagem Sabry
                 if nome_exame is None and clinica_selecionada == "Sabry":
-                    if termo_base.startswith("RM") or "RESSONANCIA" in termo_base:
+                    if "RESSONANCIA" in busca_limpa or busca_limpa.startswith("RM"):
                         nome_exame = original.upper(); preco = 545.00
-                    elif termo_base.startswith("TC") or "TOMOGRAFIA" in termo_base:
+                    elif "TOMOGRAFIA" in busca_limpa or busca_limpa.startswith("TC"):
                         nome_exame = original.upper(); preco = 165.00
 
                 if nome_exame:
