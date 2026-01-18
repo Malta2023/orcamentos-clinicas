@@ -11,12 +11,27 @@ def purificar(txt):
     txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    if txt == "GLICEMIA": txt = "GLICOSE"
     return txt.strip()
 
-# LINKS DOS ARQUIVOS SEPARADOS (FORMATO EXPORT CSV)
+# LINKS DOS ARQUIVOS SEPARADOS
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
+
+# --- DICIONÁRIO DE SIGLAS E REGRAS (MEMORIZADO) ---
+SINONIMOS = {
+    "TGO": "TRANSAMINASE OXALACETICA",
+    "AST": "TRANSAMINASE OXALACETICA",
+    "TGP": "TRANSAMINASE PIRUVICA",
+    "ALT": "TRANSAMINASE PIRUVICA",
+    "SUMARIO URINA": "SUMARIO DE URINA",
+    "SUMARIO DE URINA": "SUMARIO DE URINA",
+    "EAS": "SUMARIO DE URINA",
+    "URINA TIPO 1": "SUMARIO DE URINA",
+    "BILIRRUBINA": "BILIRRUBINAS",
+    "MICROALBUMINURIA": "MICROALBUMINURIA",
+    "GLICEMIA": "GLICOSE",
+    "HEMOGRAMA": "HEMOGRAMA"
+}
 
 if "exames_texto" not in st.session_state:
     st.session_state.exames_texto = ""
@@ -37,7 +52,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
             url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
-            # Carregamento com tratamento de erro de conexão
             df = pd.read_csv(url, on_bad_lines='skip').fillna("")
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
@@ -49,47 +63,39 @@ if st.button("✨ GERAR ORÇAMENTO"):
             for linha in linhas:
                 original = linha.strip()
                 if not original: continue
-                termo = purificar(original)
+                termo_base = purificar(original)
+                
+                # Aplica substituição por siglas/sinônimos
+                termo_para_busca = termo_base
+                for sigla_key, nome_completo in SINONIMOS.items():
+                    if sigla_key in termo_base:
+                        termo_para_busca = nome_completo
+                        break
+
                 nome_exame = None
                 preco = 0.0
 
-                # 1. REGRAS FIXAS (LABCLINICA)
+                # 1. REGRAS FIXAS LABCLINICA (TSH, GLICOSE, CREATININA)
                 if clinica_selecionada == "Labclinica":
-                    if termo == "TSH": nome_exame = "TSH"; preco = 12.24
-                    elif termo in ["GLICOSE", "GLICEMIA"]: nome_exame = "GLICOSE"; preco = 6.53
-                    elif termo == "CREATININA": nome_exame = "CREATININA"; preco = 6.53
-                    elif "CLEARENCE" in termo and "CREATININA" in termo: nome_exame = "CLEARENCE DE CREATININA"; preco = 8.16
+                    if "TSH" == termo_base: nome_exame = "TSH"; preco = 12.24
+                    elif "GLICOSE" in termo_para_busca: nome_exame = "GLICOSE"; preco = 6.53
+                    elif "CREATININA" == termo_base: nome_exame = "CREATININA"; preco = 6.53
 
-                # 2. REGRAS DE IMAGEM (SABRY)
+                # 2. REGRAS DE IMAGEM SABRY
                 if nome_exame is None and clinica_selecionada == "Sabry":
-                    if termo.startswith("RM") or "RESSONANCIA" in termo:
+                    if termo_base.startswith("RM") or "RESSONANCIA" in termo_base:
                         nome_exame = original.upper(); preco = 545.00
-                    elif termo.startswith("TC") or "TOMOGRAFIA" in termo:
+                    elif termo_base.startswith("TC") or "TOMOGRAFIA" in termo_base:
                         nome_exame = original.upper(); preco = 165.00
 
-                # 3. BUSCA ROBUSTA
+                # 3. BUSCA ROBUSTA NA TABELA
                 if nome_exame is None:
-                    # Tenta Match Exato
-                    match_exato = df[df["NOME_PURIFICADO"] == termo]
+                    # A) Tenta encontrar o termo (já convertido pela sigla) na tabela
+                    match = df[df["NOME_PURIFICADO"].str.contains(termo_para_busca, na=False)]
                     
-                    if not match_exato.empty:
-                        melhor_linha = match_exato.iloc[0]
-                    else:
-                        # Busca se o termo está contido (ex: "HEMOGRAMA" em "HEMOGRAMA COMPLETO")
-                        possiveis = df[df["NOME_PURIFICADO"].str.contains(termo, na=False)]
-                        if not possiveis.empty:
-                            # Pega o mais curto para evitar erros
-                            melhor_linha = possiveis.sort_values(by=df.columns[0], key=lambda x: x.str.len()).iloc[0]
-                        else:
-                            # Tentativa final: vê se o nome da planilha está contido no que você digitou
-                            # Inverte a lógica para cobrir casos de digitação extra
-                            melhor_linha = None
-                            for _, row in df.iterrows():
-                                if row["NOME_PURIFICADO"] in termo and len(row["NOME_PURIFICADO"]) > 3:
-                                    melhor_linha = row
-                                    break
-                    
-                    if melhor_linha is not None:
+                    if not match.empty:
+                        # Pega o que tem o nome mais curto para ser preciso
+                        melhor_linha = match.sort_values(by=df.columns[0], key=lambda x: x.str.len()).iloc[0]
                         nome_exame = melhor_linha.iloc[0]
                         p_raw = str(melhor_linha.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                         res = re.findall(r"\d+\.\d+|\d+", p_raw)
@@ -106,4 +112,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
             st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro de conexão com a planilha: {e}")
+            st.error(f"Erro: {e}")
