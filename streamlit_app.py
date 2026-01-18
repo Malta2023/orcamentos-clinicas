@@ -13,8 +13,9 @@ def purificar(txt):
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
     return txt.strip()
 
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
+# LINKS ATUALIZADOS PARA A PLANILHA NOA (ORÇAMENTO RAPIDO APP)
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE/export?format=csv&gid=1156828551"
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE/export?format=csv&gid=0"
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
@@ -29,7 +30,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
             url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
-            df = pd.read_csv(url, dtype=str).fillna("")
+            # Adicionada configuração para ignorar erros de linha e ler corretamente
+            df = pd.read_csv(url, dtype=str, on_bad_lines='skip').fillna("")
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
@@ -71,7 +73,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
 
                 # --- 3. BUSCA GERAL (ITENS NÃO MAPEADOS ACIMA) ---
                 if nome_exame is None:
-                    # Impede RM/TC na Labclinica
                     if clinica_selecionada == "Labclinica" and ("RESSONANCIA" in termo or "TOMOGRAFIA" in termo):
                         pass 
                     else:
@@ -92,8 +93,11 @@ if st.button("✨ GERAR ORÇAMENTO"):
                         
                         if melhor_linha is not None:
                             nome_exame = melhor_linha.iloc[0]
-                            p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
-                            preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
+                            # Limpeza de preço mais robusta
+                            p_raw = str(melhor_linha.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
+                            preco_extraido = re.findall(r"\d+\.\d+|\d+", p_raw)
+                            if preco_extraido:
+                                preco = float(preco_extraido[0])
 
                 if nome_exame:
                     total += preco
