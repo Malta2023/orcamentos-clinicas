@@ -4,7 +4,6 @@ import unicodedata
 import re
 from urllib.parse import quote
 
-# Configuração da Página
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
 def purificar(txt):
@@ -12,13 +11,10 @@ def purificar(txt):
     txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    if txt == "GLICEMIA": txt = "GLICOSE"
     return txt.strip()
 
-# LINKS FORMATADOS PARA EXPORTAÇÃO DIRETA
-ID_PLANILHA = "1--52OdN2HIuLb6szIvVTL-HBBLmtLshMjWD4cSOuZIE"
-URL_SABRY = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=1156828551"
-URL_LABCLINICA = f"https://docs.google.com/spreadsheets/d/{ID_PLANILHA}/export?format=csv&gid=0"
+URL_SABRY = "https://docs.google.com/spreadsheets/d/1EHiFbpWyPzjyLJhxpC0FGw3A70m3xVZngXrK8LyzFEo/export?format=csv"
+URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1ShcArMEHU9UDB0yWI2fkF75LXGDjXOHpX-5L_1swz5I/export?format=csv"
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
@@ -33,9 +29,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         try:
             url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
-            
-            # Leitura com tratamento de erro de conexão
-            df = pd.read_csv(url, on_bad_lines='skip').fillna("")
+            df = pd.read_csv(url, dtype=str).fillna("")
             df["NOME_PURIFICADO"] = df.iloc[:, 0].apply(purificar)
 
             linhas = re.split(r"\n|,|;| E | & ", exames_raw)
@@ -47,30 +41,37 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 original = linha.strip()
                 if not original: continue
                 termo = purificar(original)
+
                 nome_exame = None
                 preco = 0.0
 
-                # REGRAS LABCLINICA
+                # --- 1. REGRAS FIXAS LABCLINICA ---
                 if clinica_selecionada == "Labclinica":
                     if "CLEARENCE" in termo and "CREATININA" in termo:
-                        nome_exame = "CLEARENCE DE CREATININA"; preco = 8.16
+                        nome_exame = "CLEARENCE DE CREATININA"
+                        preco = 8.16
                     elif termo == "CREATININA":
-                        nome_exame = "CREATININA"; preco = 6.53
+                        nome_exame = "CREATININA"
+                        preco = 6.53
                     elif termo == "TSH":
-                        nome_exame = "TSH"; preco = 12.24
-                    elif termo == "GLICOSE":
-                        nome_exame = "GLICOSE"; preco = 6.53
+                        nome_exame = "TSH"
+                        preco = 12.24
+                    elif termo in ["GLICOSE", "GLICEMIA"]:
+                        nome_exame = "GLICOSE"
+                        preco = 6.53
 
-                # REGRAS IMAGEM SABRY
+                # --- 2. REGRA DE IMAGEM (EXCLUSIVA SABRY) ---
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     is_rm = "RESSONANCIA" in termo or termo.startswith("RM")
                     is_tc = "TOMOGRAFIA" in termo or termo.startswith("TC")
+                    
                     if (is_rm or is_tc) and "ANGIO" not in termo:
                         nome_exame = original.upper()
                         preco = 545.00 if is_rm else 165.00
 
-                # BUSCA GERAL
+                # --- 3. BUSCA GERAL (ITENS NÃO MAPEADOS ACIMA) ---
                 if nome_exame is None:
+                    # Impede RM/TC na Labclinica
                     if clinica_selecionada == "Labclinica" and ("RESSONANCIA" in termo or "TOMOGRAFIA" in termo):
                         pass 
                     else:
@@ -84,12 +85,14 @@ if st.button("✨ GERAR ORÇAMENTO"):
                             for w in t_words:
                                 if w in n_words: pontos += 10
                                 elif w in row["NOME_PURIFICADO"]: pontos += 2
+                            
                             if pontos > melhor_pontuacao and pontos > 0:
-                                melhor_pontuacao = pontos; melhor_linha = row
+                                melhor_pontuacao = pontos
+                                melhor_linha = row
                         
                         if melhor_linha is not None:
                             nome_exame = melhor_linha.iloc[0]
-                            p_raw = str(melhor_linha.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
+                            p_raw = melhor_linha.iloc[1].replace("R$", "").replace(".", "").replace(",", ".")
                             preco = float(re.findall(r"\d+\.\d+|\d+", p_raw)[0])
 
                 if nome_exame:
@@ -103,4 +106,4 @@ if st.button("✨ GERAR ORÇAMENTO"):
             st.markdown(f'<a href="https://wa.me/?text={quote(texto)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
             
         except Exception as e:
-            st.error(f"Erro: {e}. Tente clicar no botão NOVO ORÇAMENTO.")
+            st.error(f"Erro: {e}")
