@@ -17,15 +17,18 @@ def purificar(txt):
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# TRADUTOR DE ENTRADA
+# TRADUTOR DE ENTRADA REFORÇADO
 MAPA_SINONIMOS = {
     "PCU": "PROTEINA C REATIVA ULTRASENSIVEL",
     "PROTEINA C ULTRASSENSIVEL": "PROTEINA C REATIVA ULTRASENSIVEL",
     "EAS": "SUMARIO DE URINA",
     "AST": "TGO",
     "ALT": "TGP",
-    "ANTI TPO": "MICROSSOMAL",
-    "ANTI TG": "TIREOGLOBULINA"
+    "ANTI TPO": "TPO", # Foca na sigla principal
+    "TPO": "ANTI TPO",
+    "ANTI TG": "TIREOGLOBULINA",
+    "VITAMINA D": "25 HIDROXIVITAMINA D",
+    "GAMA GT": "GAMA"
 }
 
 if "exames_texto" not in st.session_state:
@@ -41,7 +44,7 @@ if st.button("🔄 NOVO ORÇAMENTO / ATUALIZAR", on_click=acao_limpar):
     st.rerun()
 
 clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
-exames_raw = st.text_area("Cole os exames:", height=200, key="exames_texto")
+exames_raw = st.text_area("Cole os exames:", height=250, key="exames_texto")
 
 @st.cache_data(ttl=5)
 def carregar_dados(url):
@@ -73,22 +76,25 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 # 1. BUSCA EXATA
                 match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # 2. BUSCA POR CONTÉM (Flexível para Bilirrubina, Homocisteína, etc)
+                # 2. BUSCA POR CONTÉM (Flexível)
                 if match.empty:
                     match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
                 
-                # --- FILTRO ANTI-INVASOR (Bloqueia VHS se ele aparecer por engano) ---
+                # 3. BUSCA POR PALAVRAS SEPARADAS (Caso o Anti-TPO esteja como "ANTITPO" ou similar)
+                if match.empty and " " in busca:
+                    partes = busca.split()
+                    match = df[df["NOME_PURIFICADO"].apply(lambda x: all(p in str(x) for p in partes))]
+
+                # FILTRO ANTI-INVASOR (VHS)
                 if not match.empty:
                     match = match.copy()
-                    # Se o resultado for VHS mas o usuário NÃO pediu VHS, ignora
-                    if "VHS" in match["NOME_PURIFICADO"].values and "VHS" not in termo_original_limpo and "HEMOSSEDIMENTACAO" not in termo_original_limpo:
+                    if "VHS" in match["NOME_PURIFICADO"].values and "VHS" not in termo_original_limpo:
                         match = match[match["NOME_PURIFICADO"] != "VHS"]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
-                    # Se sobrou algo, pega o mais curto/específico
                     match["len"] = match["NOME_PURIFICADO"].apply(len)
                     res = match.sort_values("len").iloc[0]
                     
@@ -97,12 +103,6 @@ if st.button("✨ GERAR ORÇAMENTO"):
                         p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                         valores = re.findall(r"\d+\.\d+|\d+", p_raw)
                         if valores: preco = float(valores[0])
-
-                # Regra de Imagem Sabry
-                if nome_exame is None and clinica_selecionada == "Sabry":
-                    if any(x in termo_original_limpo for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
-                        nome_exame = original.upper()
-                        preco = 545.00 if ("RM" in termo_original_limpo or "RESSONANCIA" in termo_original_limpo) else 165.00
 
                 if nome_exame:
                     total += preco
