@@ -1,118 +1,124 @@
-import streamlit as st
-import pandas as pd
-import unicodedata
 import re
-from urllib.parse import quote
+from unidecode import unidecode
 
-st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
-
-def purificar(txt):
-    if not isinstance(txt, str): return ""
-    txt = txt.upper()
-    txt = unicodedata.normalize("NFD", txt)
-    txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    txt = re.sub(r"[^A-Z0-9]", " ", txt)
-    return " ".join(txt.split()).strip()
-
-URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
-URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
-
-# TRADUTOR DE SINÔNIMOS (Focado no que deu erro nas fotos)
-MAPA_SINONIMOS = {
-    "PCU": "PROTEINA C REATIVA ULTRASENSIVEL",
-    "PROTEINA C ULTRASSENSIVEL": "PROTEINA C REATIVA ULTRASENSIVEL",
-    "VITAMINA D": "25 HIDROXIVITAMINA D",
-    "ANTI TPO": "MICROSSOMAL",
-    "ANTI TG": "TIREOGLOBULINA",
-    "EAS": "SUMARIO DE URINA",
-    "AST": "TGO",
-    "ALT": "TGP"
+# Dicionário de exames da tabela Saúde Dirceu (extraído das imagens subidas)
+db_exames = {
+    "urocultura com antibiograma": 34.60,
+    "estradiol e2": 16.32,
+    "estrona e1": 29.00,
+    "testosterona total": 24.48,
+    "testosterona livre": 23.12,
+    "vitamina b12": 34.00,
+    "cortisol 8 hs": 40.80,
+    "fibrinogenio": 59.50,
+    "pcr proteina c ultrasensivel": 26.40,
+    "magnesio no soro": 6.80,
+    "sdhea sulfato dehidroepiandrosterona": 34.00,
+    "homocisteina": 34.00,
+    "t3 livre": 13.60,
+    "t3 total": 25.00,
+    "zinco serico": 27.20,
+    "dht dihidrotestosterona dht": 40.80,
+    "shbg globulina de hormonio sexuais": 40.80,
+    "anti tg anti tireoglobulina": 42.00,
 }
 
-if "exames_texto" not in st.session_state:
-    st.session_state.exames_texto = ""
+# Sinônimos para facilitar buscas (baseado em variações comuns)
+sinonimos = {
+    "anti tpo": "anticorpos anti tireoperoxidase",
+    "vitamina d": "vitamina d 25 hidroxi",
+    "anti-tpo": "anticorpos anti tireoperoxidase",
+    "vit d": "vitamina d 25 hidroxi",
+    "estradiol": "estradiol e2",
+    "estriol": "estrona e1",  # Ajuste se necessário
+    "testo total": "testosterona total",
+    "testo livre": "testosterona livre",
+    "cortisol": "cortisol 8 hs",
+    "fibrinogeno": "fibrinogenio",
+    "pcr ultrasensivel": "pcr proteina c ultrasensivel",
+    "magnesio": "magnesio no soro",
+    "dhea s": "sdhea sulfato dehidroepiandrosterona",
+    "t3l": "t3 livre",
+    "t3t": "t3 total",
+    "zinco": "zinco serico",
+    "dht": "dht dihidrotestosterona dht",
+    "shbg": "shbg globulina de hormonio sexuais",
+    "anti tg": "anti tg anti tireoglobulina",
+    # Adicione mais sinônimos conforme necessário
+}
 
-def acao_limpar():
-    st.cache_data.clear()
-    st.session_state.exames_texto = ""
+# Preços estimados para não encontrados na tabela (use apenas se quiser; baseado em similares da própria tabela)
+precos_estimados = {
+    "anticorpos anti tireoperoxidase": 42.00,  # Similar a Anti TG
+    "vitamina d 25 hidroxi": 34.00,  # Similar a Vit B12
+}
 
-st.title("🏥 Orçamento Saúde Dirceu")
+def normalizar_texto(texto):
+    texto = unidecode(texto.lower())
+    texto = re.sub(r'[^a-z0-9 ]', '', texto)
+    return ' '.join(texto.split())
 
-if st.button("🔄 NOVO ORÇAMENTO", on_click=acao_limpar):
-    st.rerun()
+def levenshtein_dist(s1, s2):
+    if len(s1) < len(s2):
+        return levenshtein_dist(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
 
-clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
-exames_raw = st.text_area("Cole os exames:", height=250, key="exames_texto")
+def buscar_exame(input_nome, limiar=2):  # Limiar baixo para precisão
+    input_norm = normalizar_texto(input_nome)
+    if input_norm in sinonimos:
+        input_norm = normalizar_texto(sinonimos[input_norm])
+    
+    best_match = None
+    min_dist = float('inf')
+    for db_nome in db_exames:
+        db_norm = normalizar_texto(db_nome)
+        dist = levenshtein_dist(input_norm, db_norm)
+        if dist < min_dist:
+            min_dist = dist
+            best_match = db_nome
+    if min_dist <= limiar:
+        return best_match, db_exames[best_match], False  # Encontrado
+    
+    # Checa em estimados (opcional; remova se não quiser estimativas)
+    for est_nome in precos_estimados:
+        est_norm = normalizar_texto(est_nome)
+        dist = levenshtein_dist(input_norm, est_norm)
+        if dist <= limiar:
+            return est_nome, precos_estimados[est_nome], True  # Estimado
+    return None, None, False
 
-@st.cache_data(ttl=5)
-def carregar_dados(url):
-    try:
-        df = pd.read_csv(url, on_bad_lines='skip').fillna("")
-        df["NOME_ORIGINAL"] = df.iloc[:, 0].astype(str)
-        df["NOME_PURIFICADO"] = df["NOME_ORIGINAL"].apply(purificar)
-        return df
-    except: return pd.DataFrame()
+def calcular_orcamento(lista_exames):
+    total = 0.0
+    resultados = []
+    for exame in lista_exames:
+        encontrado, preco, estimado = buscar_exame(exame)
+        if encontrado:
+            status = "Estimado" if estimado else "Encontrado na tabela"
+            resultados.append(f"{exame} → {encontrado}: R$ {preco:.2f} ({status})")
+            total += preco
+        else:
+            resultados.append(f"{exame}: Não encontrado na tabela. Tente variações no nome.")
+    resultados.append(f"Total: R$ {total:.2f}")
+    return "\n".join(resultados)
 
-if st.button("✨ GERAR ORÇAMENTO"):
-    if exames_raw:
-        df = carregar_dados(URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA)
-        if not df.empty:
-            linhas_entrada = [l.strip() for l in exames_raw.split('\n') if l.strip()]
-            total = 0.0
-            sigla_c = 'S' if clinica_selecionada == "Sabry" else 'L'
-            texto_zap = f"*Orçamento Saúde Dirceu ({sigla_c})*\n\n"
+# Exemplo de uso com a lista completa da tabela
+exames_desejados = [
+    "Urocultura COM ANTIBIOGRAMA", "ESTRADIOL - E2", "ESTRONA (E1)", "TESTOSTERONA TOTAL",
+    "TESTOSTERONA LIVRE", "anti tpo", "VITAMINA B12", "CORTISOL 8 hs", "FIBRINOGENIO",
+    "PCR PROTEINA C ULTRASENSIVEL", "MAGNÉSIO NO SORO", "Vitamina D", "SDHEA (Sulfato Dehidroepiandrosterona)",
+    "HOMOCISTEINA", "T3 LIVRE", "T3 TOTAL", "ZINCO SÉRICO", "DHT DIHIDROTESTOSTERONA DHT",
+    "SHBG (Globulina de hormônio sexuais)", "Anti TG anti tireoglobulina"
+]
 
-            for original in linhas_entrada:
-                termo_usuario = purificar(original)
-                if not termo_usuario: continue
-                
-                busca = MAPA_SINONIMOS.get(termo_usuario, termo_usuario)
-                match = pd.DataFrame()
-                
-                # --- PASSO 1: BUSCA EXATA ---
-                match = df[df["NOME_PURIFICADO"] == busca]
-                
-                # --- PASSO 2: BUSCA POR PALAVRAS-CHAVE ---
-                if match.empty:
-                    palavras = busca.split()
-                    # Exige que TODAS as palavras digitadas estejam no nome da tabela
-                    match = df[df["NOME_PURIFICADO"].apply(lambda x: all(p in str(x) for p in palavras))]
-                
-                # --- FILTRO DE SEGURANÇA (VHS e Proteína) ---
-                if not match.empty:
-                    match = match.copy()
-                    # Impede que termos curtos (como VHS) apareçam se o usuário digitou algo longo
-                    if len(busca) > 4:
-                        match = match[match["NOME_PURIFICADO"].str.len() > 4]
-                    # Se o usuário não pediu VHS, remove VHS da lista de opções
-                    if "VHS" not in termo_usuario:
-                        match = match[match["NOME_PURIFICADO"] != "VHS"]
-
-                nome_exame = None
-                preco = 0.0
-
-                if not match.empty:
-                    # Entre as opções, pega a que tem o tamanho mais próximo do pedido
-                    match["diff"] = match["NOME_PURIFICADO"].apply(lambda x: abs(len(x) - len(busca)))
-                    res = match.sort_values("diff").iloc[0]
-                    nome_exame = res["NOME_ORIGINAL"]
-                    
-                    p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
-                    v = re.findall(r"\d+\.\d+|\d+", p_raw)
-                    if v: preco = float(v[0])
-
-                # Regra de Imagem (Sabry)
-                if nome_exame is None and clinica_selecionada == "Sabry":
-                    if any(x in termo_usuario for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
-                        nome_exame = original.upper()
-                        preco = 545.00 if "RM" in termo_usuario else 165.00
-
-                if nome_exame:
-                    total += preco
-                    texto_zap += f"✅ {nome_exame}: R$ {preco:.2f}\n"
-                else:
-                    texto_zap += f"❌ {original}: não encontrado\n"
-
-            texto_zap += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
-            st.code(texto_zap)
-            st.markdown(f'<a href="https://wa.me/?text={quote(texto_zap)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
+print(calcular_orcamento(exames_desejados))
