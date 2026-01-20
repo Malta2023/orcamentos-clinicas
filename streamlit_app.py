@@ -1,4 +1,5 @@
 import re
+import streamlit as st
 
 # Dicionário de exames da tabela Saúde Dirceu (extraído das imagens subidas)
 db_exames = {
@@ -29,7 +30,7 @@ sinonimos = {
     "anti-tpo": "anticorpos anti tireoperoxidase",
     "vit d": "vitamina d 25 hidroxi",
     "estradiol": "estradiol e2",
-    "estriol": "estrona e1",  # Ajuste se necessário
+    "estriol": "estrona e1",
     "testo total": "testosterona total",
     "testo livre": "testosterona livre",
     "cortisol": "cortisol 8 hs",
@@ -46,14 +47,13 @@ sinonimos = {
     # Adicione mais sinônimos conforme necessário
 }
 
-# Preços estimados para não encontrados na tabela (baseado em similares da própria tabela)
+# Preços estimados para não encontrados na tabela (baseado em similares)
 precos_estimados = {
     "anticorpos anti tireoperoxidase": 42.00,  # Similar a Anti TG
     "vitamina d 25 hidroxi": 34.00,  # Similar a Vit B12
 }
 
 def remove_accents(texto):
-    # Função manual para remover acentos comuns em português
     accents = {
         'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
         'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
@@ -91,7 +91,7 @@ def levenshtein_dist(s1, s2):
         previous_row = current_row
     return previous_row[-1]
 
-def buscar_exame(input_nome, limiar=2):  # Limiar baixo para precisão
+def buscar_exame(input_nome, limiar=2):
     input_norm = normalizar_texto(input_nome)
     if input_norm in sinonimos:
         input_norm = normalizar_texto(sinonimos[input_norm])
@@ -105,20 +105,21 @@ def buscar_exame(input_nome, limiar=2):  # Limiar baixo para precisão
             min_dist = dist
             best_match = db_nome
     if min_dist <= limiar:
-        return best_match, db_exames[best_match], False  # Encontrado
+        return best_match, db_exames[best_match], False
     
-    # Checa em estimados (opcional; remova se não quiser estimativas)
     for est_nome in precos_estimados:
         est_norm = normalizar_texto(est_nome)
         dist = levenshtein_dist(input_norm, est_norm)
         if dist <= limiar:
-            return est_nome, precos_estimados[est_nome], True  # Estimado
+            return est_nome, precos_estimados[est_nome], True
     return None, None, False
 
 def calcular_orcamento(lista_exames):
     total = 0.0
     resultados = []
     for exame in lista_exames:
+        if not exame.strip():
+            continue
         encontrado, preco, estimado = buscar_exame(exame)
         if encontrado:
             status = "Estimado" if estimado else "Encontrado na tabela"
@@ -126,16 +127,22 @@ def calcular_orcamento(lista_exames):
             total += preco
         else:
             resultados.append(f"{exame}: Não encontrado na tabela. Tente variações no nome.")
-    resultados.append(f"Total: R$ {total:.2f}")
-    return "\n".join(resultados)
+    return resultados, total
 
-# Exemplo de uso com a lista completa da tabela
-exames_desejados = [
-    "Urocultura COM ANTIBIOGRAMA", "ESTRADIOL - E2", "ESTRONA (E1)", "TESTOSTERONA TOTAL",
-    "TESTOSTERONA LIVRE", "anti tpo", "VITAMINA B12", "CORTISOL 8 hs", "FIBRINOGENIO",
-    "PCR PROTEINA C ULTRASENSIVEL", "MAGNÉSIO NO SORO", "Vitamina D", "SDHEA (Sulfato Dehidroepiandrosterona)",
-    "HOMOCISTEINA", "T3 LIVRE", "T3 TOTAL", "ZINCO SÉRICO", "DHT DIHIDROTESTOSTERONA DHT",
-    "SHBG (Globulina de hormônio sexuais)", "Anti TG anti tireoglobulina"
-]
+# Interface do Streamlit
+st.title("Orçamento de Exames - Saúde Dirceu")
 
-print(calcular_orcamento(exames_desejados))
+st.write("Digite os nomes dos exames desejados, um por linha:")
+
+exames_input = st.text_area("Exames (um por linha)", height=200)
+
+if st.button("Calcular Orçamento"):
+    if exames_input:
+        lista_exames = exames_input.split("\n")
+        resultados, total = calcular_orcamento(lista_exames)
+        st.subheader("Resultados:")
+        for res in resultados:
+            st.write(res)
+        st.subheader(f"Total: R$ {total:.2f}")
+    else:
+        st.warning("Por favor, insira pelo menos um exame.")
