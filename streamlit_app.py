@@ -24,11 +24,15 @@ MAPA_SINONIMOS = {
     "EAS": "SUMARIO DE URINA",
     "AST": "TGO",
     "ALT": "TGP",
-    "ANTI TPO": "TPO", # Foca na sigla principal
-    "TPO": "ANTI TPO",
+    "ANTI TPO": "MICROSSOMAL",
     "ANTI TG": "TIREOGLOBULINA",
+    "GAMA GT": "GAMA",
+    # VARIAÇÕES VITAMINA D
     "VITAMINA D": "25 HIDROXIVITAMINA D",
-    "GAMA GT": "GAMA"
+    "VIT D": "25 HIDROXIVITAMINA D",
+    "VITD": "25 HIDROXIVITAMINA D",
+    "D3": "25 HIDROXIVITAMINA D",
+    "VITAMINA D3": "25 HIDROXIVITAMINA D"
 }
 
 if "exames_texto" not in st.session_state:
@@ -67,38 +71,39 @@ if st.button("✨ GERAR ORÇAMENTO"):
             texto_zap = f"*Orçamento Saúde Dirceu ({sigla_c})*\n\n"
 
             for original in linhas_entrada:
-                termo_original_limpo = purificar(original)
-                if not termo_original_limpo: continue
+                termo_usuario = purificar(original)
+                if not termo_usuario: continue
                 
-                busca = MAPA_SINONIMOS.get(termo_original_limpo, termo_original_limpo)
+                busca = MAPA_SINONIMOS.get(termo_usuario, termo_usuario)
                 match = pd.DataFrame()
                 
                 # 1. BUSCA EXATA
                 match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # 2. BUSCA POR CONTÉM (Flexível)
+                # 2. BUSCA POR CONTÉM
                 if match.empty:
                     match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
                 
-                # 3. BUSCA POR PALAVRAS SEPARADAS (Caso o Anti-TPO esteja como "ANTITPO" ou similar)
+                # 3. BUSCA POR PALAVRAS (Caso: "VITAMINA D" encontrar "25 HIDROXIVITAMINA D")
                 if match.empty and " " in busca:
                     partes = busca.split()
+                    # Procura linhas que contenham TODAS as palavras digitadas
                     match = df[df["NOME_PURIFICADO"].apply(lambda x: all(p in str(x) for p in partes))]
-
-                # FILTRO ANTI-INVASOR (VHS)
-                if not match.empty:
-                    match = match.copy()
-                    if "VHS" in match["NOME_PURIFICADO"].values and "VHS" not in termo_original_limpo:
-                        match = match[match["NOME_PURIFICADO"] != "VHS"]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
-                    match["len"] = match["NOME_PURIFICADO"].apply(len)
-                    res = match.sort_values("len").iloc[0]
+                    match = match.copy()
+                    # Se o usuário não pediu VHS, remove o VHS dos resultados (filtro de segurança)
+                    if "VHS" in match["NOME_PURIFICADO"].values and "VHS" not in termo_usuario:
+                        match = match[match["NOME_PURIFICADO"] != "VHS"]
                     
-                    if len(res) >= 2:
+                    if not match.empty:
+                        # Pega o que tem o nome mais parecido em tamanho (evita erros de "carona")
+                        match["len_diff"] = match["NOME_PURIFICADO"].apply(lambda x: abs(len(x) - len(busca)))
+                        res = match.sort_values("len_diff").iloc[0]
+                        
                         nome_exame = res["NOME_ORIGINAL"]
                         p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                         valores = re.findall(r"\d+\.\d+|\d+", p_raw)
