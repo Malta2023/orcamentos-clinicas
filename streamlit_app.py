@@ -17,16 +17,14 @@ def purificar(txt):
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# TRADUTOR DE ENTRADA (Mantenha sempre atualizado aqui)
 MAPA_SINONIMOS = {
     "PCU": "PROTEINA C REATIVA ULTRASENSIVEL",
     "PROTEINA C ULTRASSENSIVEL": "PROTEINA C REATIVA ULTRASENSIVEL",
-    "BILIRRUBINA": "BILIRRUBINA",
-    "GAMA GT": "GAMA",
     "EAS": "SUMARIO DE URINA",
-    "CHLAMYDIA": "CLAMIDEA",
     "AST": "TGO",
-    "ALT": "TGP"
+    "ALT": "TGP",
+    "ANTI TPO": "MICROSSOMAL",
+    "ANTI TG": "TIREOGLOBULINA"
 }
 
 if "exames_texto" not in st.session_state:
@@ -58,12 +56,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
         df = carregar_dados(URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA)
         
-        if df.empty:
-            st.error("Erro ao carregar a planilha. Verifique a conexão.")
-        else:
-            # Divide a entrada respeitando a ordem das linhas
+        if not df.empty:
             linhas_entrada = [l.strip() for l in exames_raw.split('\n') if l.strip()]
-            
             total = 0.0
             sigla_c = 'S' if clinica_selecionada == "Sabry" else 'L'
             texto_zap = f"*Orçamento Saúde Dirceu ({sigla_c})*\n\n"
@@ -75,29 +69,30 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 busca = MAPA_SINONIMOS.get(termo, termo)
                 match = pd.DataFrame()
                 
-                # 1. Busca Exata (Evita o erro do VHS aparecer por engano)
+                # 1. TENTA MATCH EXATO (Prioridade Máxima)
                 match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # 2. Busca por Contém (Só se a busca tiver mais de 3 letras para evitar falsos positivos)
-                if match.empty and len(busca) > 3:
-                    match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
+                # 2. TENTA BUSCA POR PALAVRA INTEIRA (Evita VHS dentro de Testosterona)
+                if match.empty:
+                    # Cria um padrão que exige que a palavra esteja isolada
+                    padrao = r'\b' + re.escape(busca) + r'\b'
+                    match = df[df["NOME_PURIFICADO"].str.contains(padrao, case=False, na=False, regex=True)]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
-                    # Proteção para garantir que pegamos uma linha com preço
                     match = match.copy()
                     match["len"] = match["NOME_PURIFICADO"].apply(len)
                     res = match.sort_values("len").iloc[0]
                     
-                    if len(res) >= 2: # Verifica se a coluna de preço existe
+                    if len(res) >= 2:
                         nome_exame = res["NOME_ORIGINAL"]
                         p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                         valores = re.findall(r"\d+\.\d+|\d+", p_raw)
                         if valores: preco = float(valores[0])
 
-                # Regra de Imagem (Sabry)
+                # Regra de Imagem Sabry
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     if any(x in termo for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
                         nome_exame = original.upper()
