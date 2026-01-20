@@ -17,17 +17,17 @@ def purificar(txt):
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# TRADUTOR DE ENTRADA
+# TRADUTOR DE ENTRADA E DISTINÇÕES
 MAPA_SINONIMOS = {
+    "PCU": "PROTEINA C REATIVA ULTRASENSIVEL",
+    "PCR": "PROTEINA C REATIVA",
+    "LIPOPROTEINA": "LIPOPROTEINA",
     "BILIRRUBINA": "BILIRRUBINA",
-    "BILIRRUBINAS": "BILIRRUBINA",
     "GAMA GT": "GAMA",
     "EAS": "SUMARIO DE URINA",
-    "SUMARIO URINA": "SUMARIO DE URINA",
     "CHLAMYDIA": "CLAMIDEA",
     "AST": "TGO",
-    "ALT": "TGP",
-    "GLICEMIA": "GLICOSE"
+    "ALT": "TGP"
 }
 
 if "exames_texto" not in st.session_state:
@@ -68,23 +68,16 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 if not original: continue
                 
                 termo = purificar(original)
-                
-                # Pega a primeira palavra para uma busca mais "agressiva" se falhar
-                primeira_palavra = termo.split()[0] if termo else ""
                 busca = MAPA_SINONIMOS.get(termo, termo)
 
                 match = pd.DataFrame()
                 
-                # 1. Busca Exata
+                # 1. Busca Exata (Evita que Lipoproteína bata em Proteína C se você digitar exato)
                 match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # 2. Busca por Contém (termo completo)
+                # 2. Busca por Contém
                 if match.empty:
                     match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
-                
-                # 3. Busca pela Primeira Palavra (Caso de Bilirrubinas/Gama)
-                if match.empty and len(primeira_palavra) > 3:
-                    match = df[df["NOME_PURIFICADO"].str.contains(primeira_palavra, na=False)]
 
                 nome_exame = None
                 preco = 0.0
@@ -92,18 +85,13 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 if not match.empty:
                     match = match.copy()
                     match["len"] = match["NOME_PURIFICADO"].apply(len)
+                    # Pega o mais curto para evitar pegar Proteína C quando busca "Proteína"
                     res = match.sort_values("len").iloc[0]
                     nome_exame = res["NOME_ORIGINAL"]
                     
                     p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                     valores = re.findall(r"\d+\.\d+|\d+", p_raw)
                     if valores: preco = float(valores[0])
-
-                # Regra de Imagem (Sabry)
-                if nome_exame is None and clinica_selecionada == "Sabry":
-                    if any(x in termo for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
-                        nome_exame = original.upper()
-                        preco = 545.00 if "RM" in termo or "RESSONANCIA" in termo else 165.00
 
                 if nome_exame:
                     total += preco
