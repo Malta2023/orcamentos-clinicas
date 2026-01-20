@@ -7,26 +7,32 @@ from urllib.parse import quote
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered")
 
 def purificar(txt):
+    """Transforma qualquer nome em uma 'chave' única sem espaços ou símbolos."""
     if not isinstance(txt, str): return ""
     txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    txt = re.sub(r"[^A-Z0-9]", " ", txt)
-    return " ".join(txt.split()).strip()
+    # Remove termos que variam entre tabelas mas são o mesmo exame
+    termos_ignore = ["NOSORO", "SANGUE", "EXAMEDE", "MATERIAU", "SORO", "VALOR", "SÉRICO", "PESQUISA", "DOSAGEM"]
+    txt_limpo = re.sub(r"[^A-Z0-9]", "", txt)
+    for termo in termos_ignore:
+        txt_limpo = txt_limpo.replace(termo, "")
+    return txt_limpo
 
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# TRADUTOR DE SINÔNIMOS (Focado no que deu erro nas fotos)
-MAPA_SINONIMOS = {
-    "PCU": "PROTEINA C REATIVA ULTRASENSIVEL",
-    "PROTEINA C ULTRASSENSIVEL": "PROTEINA C REATIVA ULTRASENSIVEL",
-    "VITAMINA D": "25 HIDROXIVITAMINA D",
-    "ANTI TPO": "MICROSSOMAL",
-    "ANTI TG": "TIREOGLOBULINA",
-    "EAS": "SUMARIO DE URINA",
+# TRADUTOR INTELIGENTE: Liga o que você digita ao que as tabelas costumam ter
+DICIONARIO_PADRAO = {
+    "VITAMINAD": "VITAMINAD",
+    "ANTITPO": "TPO",
+    "ANTITG": "TIREOGLOBULINA",
+    "PCU": "PROTEINACREATIVAULTRASENSIVEL",
+    "PROTEINACULTRASSENSIVEL": "PROTEINACREATIVAULTRASENSIVEL",
+    "EAS": "SUMARIODEURINA",
     "AST": "TGO",
-    "ALT": "TGP"
+    "ALT": "TGP",
+    "GAMAGT": "GAMA"
 }
 
 if "exames_texto" not in st.session_state:
@@ -55,7 +61,9 @@ def carregar_dados(url):
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
+        # Pega a tabela ESPECÍFICA escolhida no rádio
         df = carregar_dados(URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA)
+        
         if not df.empty:
             linhas_entrada = [l.strip() for l in exames_raw.split('\n') if l.strip()]
             total = 0.0
@@ -63,49 +71,38 @@ if st.button("✨ GERAR ORÇAMENTO"):
             texto_zap = f"*Orçamento Saúde Dirceu ({sigla_c})*\n\n"
 
             for original in linhas_entrada:
-                termo_usuario = purificar(original)
-                if not termo_usuario: continue
+                entrada_limpa = purificar(original)
+                if not entrada_limpa: continue
                 
-                busca = MAPA_SINONIMOS.get(termo_usuario, termo_usuario)
-                match = pd.DataFrame()
+                # Tradução via dicionário ou usa o próprio termo limpo
+                busca_final = DICIONARIO_PADRAO.get(entrada_limpa, entrada_limpa)
                 
-                # --- PASSO 1: BUSCA EXATA ---
-                match = df[df["NOME_PURIFICADO"] == busca]
+                # Busca na tabela selecionada
+                match = df[df["NOME_PURIFICADO"].str.contains(busca_final, na=False)]
                 
-                # --- PASSO 2: BUSCA POR PALAVRAS-CHAVE ---
-                if match.empty:
-                    palavras = busca.split()
-                    # Exige que TODAS as palavras digitadas estejam no nome da tabela
-                    match = df[df["NOME_PURIFICADO"].apply(lambda x: all(p in str(x) for p in palavras))]
-                
-                # --- FILTRO DE SEGURANÇA (VHS e Proteína) ---
-                if not match.empty:
-                    match = match.copy()
-                    # Impede que termos curtos (como VHS) apareçam se o usuário digitou algo longo
-                    if len(busca) > 4:
-                        match = match[match["NOME_PURIFICADO"].str.len() > 4]
-                    # Se o usuário não pediu VHS, remove VHS da lista de opções
-                    if "VHS" not in termo_usuario:
-                        match = match[match["NOME_PURIFICADO"] != "VHS"]
+                # Filtro de segurança (VHS só se for pedido)
+                if not match.empty and "VHS" not in entrada_limpa:
+                    match = match[~match["NOME_PURIFICADO"].str.fullmatch("VHS")]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
-                    # Entre as opções, pega a que tem o tamanho mais próximo do pedido
-                    match["diff"] = match["NOME_PURIFICADO"].apply(lambda x: abs(len(x) - len(busca)))
-                    res = match.sort_values("diff").iloc[0]
-                    nome_exame = res["NOME_ORIGINAL"]
+                    # Entre os achados na clínica, pega o mais curto (mais preciso)
+                    res = match.copy()
+                    res["tam"] = res["NOME_PURIFICADO"].str.len()
+                    final = res.sort_values("tam").iloc[0]
                     
-                    p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
+                    nome_exame = final["NOME_ORIGINAL"]
+                    p_raw = str(final.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
                     v = re.findall(r"\d+\.\d+|\d+", p_raw)
                     if v: preco = float(v[0])
 
-                # Regra de Imagem (Sabry)
+                # Regra de Imagem Exclusiva Sabry
                 if nome_exame is None and clinica_selecionada == "Sabry":
-                    if any(x in termo_usuario for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
+                    if any(x in entrada_limpa for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
                         nome_exame = original.upper()
-                        preco = 545.00 if "RM" in termo_usuario else 165.00
+                        preco = 545.00 if "RM" in entrada_limpa else 165.00
 
                 if nome_exame:
                     total += preco
