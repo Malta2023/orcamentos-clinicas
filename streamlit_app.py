@@ -17,11 +17,10 @@ def purificar(txt):
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
-# TRADUTOR DE ENTRADA E DISTINÇÕES
+# TRADUTOR DE ENTRADA (Mantenha sempre atualizado aqui)
 MAPA_SINONIMOS = {
     "PCU": "PROTEINA C REATIVA ULTRASENSIVEL",
-    "PCR": "PROTEINA C REATIVA",
-    "LIPOPROTEINA": "LIPOPROTEINA",
+    "PROTEINA C ULTRASSENSIVEL": "PROTEINA C REATIVA ULTRASENSIVEL",
     "BILIRRUBINA": "BILIRRUBINA",
     "GAMA GT": "GAMA",
     "EAS": "SUMARIO DE URINA",
@@ -39,59 +38,70 @@ def acao_limpar():
 
 st.title("🏥 Orçamento Saúde Dirceu")
 
-if st.button("🔄 ATUALIZAR TABELAS", on_click=acao_limpar):
+if st.button("🔄 NOVO ORÇAMENTO / ATUALIZAR", on_click=acao_limpar):
     st.rerun()
 
 clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica"], horizontal=True)
-exames_raw = st.text_area("Cole os exames:", height=150, key="exames_texto")
+exames_raw = st.text_area("Cole os exames:", height=200, key="exames_texto")
 
 @st.cache_data(ttl=5)
 def carregar_dados(url):
-    df = pd.read_csv(url, on_bad_lines='skip').fillna("")
-    df["NOME_ORIGINAL"] = df.iloc[:, 0].astype(str)
-    df["NOME_PURIFICADO"] = df["NOME_ORIGINAL"].apply(purificar)
-    return df
+    try:
+        df = pd.read_csv(url, on_bad_lines='skip').fillna("")
+        df["NOME_ORIGINAL"] = df.iloc[:, 0].astype(str)
+        df["NOME_PURIFICADO"] = df["NOME_ORIGINAL"].apply(purificar)
+        return df
+    except:
+        return pd.DataFrame()
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
-        try:
-            url = URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA
-            df = carregar_dados(url)
+        df = carregar_dados(URL_SABRY if clinica_selecionada == "Sabry" else URL_LABCLINICA)
+        
+        if df.empty:
+            st.error("Erro ao carregar a planilha. Verifique a conexão.")
+        else:
+            # Divide a entrada respeitando a ordem das linhas
+            linhas_entrada = [l.strip() for l in exames_raw.split('\n') if l.strip()]
             
-            linhas = re.split(r"\n|,|;", exames_raw)
             total = 0.0
             sigla_c = 'S' if clinica_selecionada == "Sabry" else 'L'
             texto_zap = f"*Orçamento Saúde Dirceu ({sigla_c})*\n\n"
 
-            for linha in linhas:
-                original = linha.strip()
-                if not original: continue
-                
+            for original in linhas_entrada:
                 termo = purificar(original)
+                if not termo: continue
+                
                 busca = MAPA_SINONIMOS.get(termo, termo)
-
                 match = pd.DataFrame()
                 
-                # 1. Busca Exata (Evita que Lipoproteína bata em Proteína C se você digitar exato)
+                # 1. Busca Exata (Evita o erro do VHS aparecer por engano)
                 match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # 2. Busca por Contém
-                if match.empty:
+                # 2. Busca por Contém (Só se a busca tiver mais de 3 letras para evitar falsos positivos)
+                if match.empty and len(busca) > 3:
                     match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
+                    # Proteção para garantir que pegamos uma linha com preço
                     match = match.copy()
                     match["len"] = match["NOME_PURIFICADO"].apply(len)
-                    # Pega o mais curto para evitar pegar Proteína C quando busca "Proteína"
                     res = match.sort_values("len").iloc[0]
-                    nome_exame = res["NOME_ORIGINAL"]
                     
-                    p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
-                    valores = re.findall(r"\d+\.\d+|\d+", p_raw)
-                    if valores: preco = float(valores[0])
+                    if len(res) >= 2: # Verifica se a coluna de preço existe
+                        nome_exame = res["NOME_ORIGINAL"]
+                        p_raw = str(res.iloc[1]).replace("R$", "").replace(".", "").replace(",", ".")
+                        valores = re.findall(r"\d+\.\d+|\d+", p_raw)
+                        if valores: preco = float(valores[0])
+
+                # Regra de Imagem (Sabry)
+                if nome_exame is None and clinica_selecionada == "Sabry":
+                    if any(x in termo for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
+                        nome_exame = original.upper()
+                        preco = 545.00 if ("RM" in termo or "RESSONANCIA" in termo) else 165.00
 
                 if nome_exame:
                     total += preco
@@ -102,6 +112,3 @@ if st.button("✨ GERAR ORÇAMENTO"):
             texto_zap += f"\n*💰 Total: R$ {total:.2f}*\n\n*Quando gostaria de agendar?*"
             st.code(texto_zap)
             st.markdown(f'<a href="https://wa.me/?text={quote(texto_zap)}" target="_blank" style="background:#25D366;color:white;padding:15px;border-radius:10px;display:block;text-align:center;font-weight:bold;text-decoration:none;">📲 ENVIAR PARA WHATSAPP</a>', unsafe_allow_html=True)
-            
-        except Exception as e:
-            st.error(f"Erro: {e}")
