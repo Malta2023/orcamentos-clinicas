@@ -17,6 +17,7 @@ def purificar(txt):
 URL_LABCLINICA = "https://docs.google.com/spreadsheets/d/1WHg78O473jhUJ0DyLozPff8JwSES13FDxK9nJhh0_Rk/export?format=csv"
 URL_SABRY = "https://docs.google.com/spreadsheets/d/1_MwGqudeX1Rpgdbd-zNub5BLcSlLa7Z7Me6shuc7BFk/export?format=csv"
 
+# TRADUTOR DE ENTRADA
 MAPA_SINONIMOS = {
     "PCU": "PROTEINA C REATIVA ULTRASENSIVEL",
     "PROTEINA C ULTRASSENSIVEL": "PROTEINA C REATIVA ULTRASENSIVEL",
@@ -63,26 +64,31 @@ if st.button("✨ GERAR ORÇAMENTO"):
             texto_zap = f"*Orçamento Saúde Dirceu ({sigla_c})*\n\n"
 
             for original in linhas_entrada:
-                termo = purificar(original)
-                if not termo: continue
+                termo_original_limpo = purificar(original)
+                if not termo_original_limpo: continue
                 
-                busca = MAPA_SINONIMOS.get(termo, termo)
+                busca = MAPA_SINONIMOS.get(termo_original_limpo, termo_original_limpo)
                 match = pd.DataFrame()
                 
-                # 1. TENTA MATCH EXATO (Prioridade Máxima)
+                # 1. BUSCA EXATA
                 match = df[df["NOME_PURIFICADO"] == busca]
                 
-                # 2. TENTA BUSCA POR PALAVRA INTEIRA (Evita VHS dentro de Testosterona)
+                # 2. BUSCA POR CONTÉM (Flexível para Bilirrubina, Homocisteína, etc)
                 if match.empty:
-                    # Cria um padrão que exige que a palavra esteja isolada
-                    padrao = r'\b' + re.escape(busca) + r'\b'
-                    match = df[df["NOME_PURIFICADO"].str.contains(padrao, case=False, na=False, regex=True)]
+                    match = df[df["NOME_PURIFICADO"].str.contains(busca, na=False)]
+                
+                # --- FILTRO ANTI-INVASOR (Bloqueia VHS se ele aparecer por engano) ---
+                if not match.empty:
+                    match = match.copy()
+                    # Se o resultado for VHS mas o usuário NÃO pediu VHS, ignora
+                    if "VHS" in match["NOME_PURIFICADO"].values and "VHS" not in termo_original_limpo and "HEMOSSEDIMENTACAO" not in termo_original_limpo:
+                        match = match[match["NOME_PURIFICADO"] != "VHS"]
 
                 nome_exame = None
                 preco = 0.0
 
                 if not match.empty:
-                    match = match.copy()
+                    # Se sobrou algo, pega o mais curto/específico
                     match["len"] = match["NOME_PURIFICADO"].apply(len)
                     res = match.sort_values("len").iloc[0]
                     
@@ -94,9 +100,9 @@ if st.button("✨ GERAR ORÇAMENTO"):
 
                 # Regra de Imagem Sabry
                 if nome_exame is None and clinica_selecionada == "Sabry":
-                    if any(x in termo for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
+                    if any(x in termo_original_limpo for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
                         nome_exame = original.upper()
-                        preco = 545.00 if ("RM" in termo or "RESSONANCIA" in termo) else 165.00
+                        preco = 545.00 if ("RM" in termo_original_limpo or "RESSONANCIA" in termo_original_limpo) else 165.00
 
                 if nome_exame:
                     total += preco
