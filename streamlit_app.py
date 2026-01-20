@@ -1,5 +1,4 @@
 import re
-from unidecode import unidecode
 
 # Dicionário de exames da tabela Saúde Dirceu (extraído das imagens subidas)
 db_exames = {
@@ -47,14 +46,32 @@ sinonimos = {
     # Adicione mais sinônimos conforme necessário
 }
 
-# Preços estimados para não encontrados na tabela (use apenas se quiser; baseado em similares da própria tabela)
+# Preços estimados para não encontrados na tabela (baseado em similares da própria tabela)
 precos_estimados = {
     "anticorpos anti tireoperoxidase": 42.00,  # Similar a Anti TG
     "vitamina d 25 hidroxi": 34.00,  # Similar a Vit B12
 }
 
+def remove_accents(texto):
+    # Função manual para remover acentos comuns em português
+    accents = {
+        'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
+        'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
+        'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
+        'ó': 'o', 'ò': 'o', 'õ': 'o', 'ô': 'o', 'ö': 'o',
+        'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
+        'ç': 'c', 'ñ': 'n',
+        'Á': 'A', 'À': 'A', 'Ã': 'A', 'Â': 'A', 'Ä': 'A',
+        'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E',
+        'Í': 'I', 'Ì': 'I', 'Î': 'I', 'Ï': 'I',
+        'Ó': 'O', 'Ò': 'O', 'Õ': 'O', 'Ô': 'O', 'Ö': 'O',
+        'Ú': 'U', 'Ù': 'U', 'Û': 'U', 'Ü': 'U',
+        'Ç': 'C', 'Ñ': 'N',
+    }
+    return ''.join(accents.get(c, c) for c in texto)
+
 def normalizar_texto(texto):
-    texto = unidecode(texto.lower())
+    texto = remove_accents(texto).lower()
     texto = re.sub(r'[^a-z0-9 ]', '', texto)
     return ' '.join(texto.split())
 
