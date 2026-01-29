@@ -4,7 +4,6 @@ import unicodedata
 import re
 from urllib.parse import quote
 
-# Configuração da Página
 st.set_page_config(page_title="Orçamento Saúde Dirceu", layout="centered", page_icon="🏥")
 
 # --- LOGO ---
@@ -24,16 +23,14 @@ def purificar(txt):
     txt = txt.upper()
     txt = unicodedata.normalize("NFD", txt)
     txt = "".join(c for c in txt if unicodedata.category(c) != "Mn")
-    # Limpeza focada no núcleo do nome
     termos_ignore = ["NOSORO", "SANGUE", "EXAMEDE", "MATERIAU", "SORO", "VALOR", "SERICO", "PESQUISA", "DOSAGEM"]
     txt_limpo = re.sub(r"[^A-Z0-9]", "", txt)
     for termo in termos_ignore:
         txt_limpo = txt_limpo.replace(termo, "")
     return txt_limpo
 
-# Tradutor de Sinônimos Unificado
 DICIONARIO_PADRAO = {
-    "VITAMINAD": "VITAMINAD25HIDROXIDO", # Ajustado para o nome na sua lista Cardiografos
+    "VITAMINAD": "VITAMINAD25HIDROXIDO",
     "ANTITPO": "ANTITPO",
     "ANTITG": "ANTITG",
     "PCU": "PROTEINACREATIVAULTRASENSIVEL",
@@ -50,17 +47,23 @@ def acao_limpar():
     st.cache_data.clear()
     st.session_state.exames_texto = ""
 
-if st.button("🔄 NOVO ORÇAMENTO", on_click=acao_limpar):
+if st.button("🔄 REINICIAR SISTEMA (LIMPAR TUDO)", on_click=acao_limpar):
     st.rerun()
 
-clinica_selecionada = st.radio("Selecione a clínica:", ["Sabry", "Labclinica", "Cardiografos"], horizontal=True)
+# Mudei a 'key' abaixo para forçar o Streamlit a redesenhar o menu
+clinica_selecionada = st.radio(
+    "Selecione a clínica:", 
+    ["Sabry", "Labclinica", "Cardiografos"], 
+    horizontal=True,
+    key="menu_v53" 
+)
+
 exames_raw = st.text_area("Cole os exames (um por linha):", height=250, key="exames_texto")
 
 @st.cache_data(ttl=5)
 def carregar_dados(url):
     try:
         df = pd.read_csv(url, on_bad_lines='skip').fillna("")
-        # Remove colunas fantasmas
         df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
         df["NOME_ORIGINAL"] = df.iloc[:, 0].astype(str)
         df["NOME_PURIFICADO"] = df["NOME_ORIGINAL"].apply(purificar)
@@ -69,8 +72,17 @@ def carregar_dados(url):
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
-        url_alvo = URL_SABRY if clinica_selecionada == "Sabry" else (URL_LABCLINICA if clinica_selecionada == "Labclinica" else URL_CARDIOGRAFOS)
-        sigla = clinica_selecionada[0]
+        # Define qual URL usar
+        if clinica_selecionada == "Sabry":
+            url_alvo = URL_SABRY
+            sigla = "S"
+        elif clinica_selecionada == "Labclinica":
+            url_alvo = URL_LABCLINICA
+            sigla = "L"
+        else:
+            url_alvo = URL_CARDIOGRAFOS
+            sigla = "C"
+            
         df = carregar_dados(url_alvo)
         
         if not df.empty:
@@ -83,11 +95,8 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 if not entrada_limpa: continue
                 
                 busca_final = DICIONARIO_PADRAO.get(entrada_limpa, entrada_limpa)
-                
-                # Busca por "Contém" para ser flexível com nomes longos
                 match = df[df["NOME_PURIFICADO"].str.contains(busca_final, na=False)]
                 
-                # Proteção contra o VHS "carona"
                 if not match.empty and "VHS" not in entrada_limpa:
                     match = match[~match["NOME_PURIFICADO"].str.fullmatch("VHS")]
 
@@ -95,25 +104,21 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 preco = 0.0
 
                 if not match.empty:
-                    # Pega o match mais curto para ser mais exato
-                    match = match.copy()
-                    match["tam"] = match["NOME_PURIFICADO"].str.len()
-                    res = match.sort_values("tam").iloc[0]
-                    
+                    final = match.copy()
+                    final["tam"] = final["NOME_PURIFICADO"].str.len()
+                    res = final.sort_values("tam").iloc[0]
                     nome_exame = res["NOME_ORIGINAL"]
                     
-                    # Captura o preço (varre as colunas da linha)
                     for col_val in res.values:
                         val_str = str(col_val).replace("R$", "").strip()
                         if "," in val_str and any(c.isdigit() for c in val_str):
-                            # Converte padrão brasileiro 1.200,00 -> 1200.00
                             limpo = val_str.replace(".", "").replace(",", ".")
                             v = re.findall(r"\d+\.\d+|\d+", limpo)
                             if v: 
                                 preco = float(v[0])
                                 break
 
-                # Regra de Imagem (Sabry)
+                # Regra de Imagem Sabry
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     if any(x in entrada_limpa for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
                         nome_exame = original.upper()
