@@ -29,15 +29,15 @@ def purificar(txt):
         txt_limpo = txt_limpo.replace(termo, "")
     return txt_limpo
 
-DICIONARIO_PADRAO = {
-    "VITAMINAD": "VITAMINAD25HIDROXIDO",
-    "ANTITPO": "ANTITPO",
-    "ANTITG": "ANTITG",
-    "PCU": "PROTEINACREATIVAULTRASENSIVEL",
-    "EAS": "SUMARIODEURINA",
-    "AST": "TGO",
-    "ALT": "TGP",
-    "GAMAGT": "GAMAGT"
+# Sinônimos básicos para facilitar a vida do usuário
+MAPA_GERAL = {
+    "VITAMINAD": ["VITAMINAD", "25HIDROXI", "VITD"],
+    "ANTITPO": ["TPO", "MICROSSOMAL"],
+    "ANTITG": ["TIREOGLOBULINA", "ANTITG"],
+    "PCU": ["PROTEINACREATIVAULTRASENSIVEL", "PCR"],
+    "EAS": ["SUMARIODEURINA", "URINAI"],
+    "AST": ["TGO"],
+    "ALT": ["TGP"]
 }
 
 if "exames_texto" not in st.session_state:
@@ -47,15 +47,14 @@ def acao_limpar():
     st.cache_data.clear()
     st.session_state.exames_texto = ""
 
-if st.button("🔄 REINICIAR SISTEMA (LIMPAR TUDO)", on_click=acao_limpar):
+if st.button("🔄 REINICIAR SISTEMA", on_click=acao_limpar):
     st.rerun()
 
-# Mudei a 'key' abaixo para forçar o Streamlit a redesenhar o menu
 clinica_selecionada = st.radio(
     "Selecione a clínica:", 
     ["Sabry", "Labclinica", "Cardiografos"], 
     horizontal=True,
-    key="menu_v53" 
+    key="menu_v54"
 )
 
 exames_raw = st.text_area("Cole os exames (um por linha):", height=250, key="exames_texto")
@@ -72,17 +71,8 @@ def carregar_dados(url):
 
 if st.button("✨ GERAR ORÇAMENTO"):
     if exames_raw:
-        # Define qual URL usar
-        if clinica_selecionada == "Sabry":
-            url_alvo = URL_SABRY
-            sigla = "S"
-        elif clinica_selecionada == "Labclinica":
-            url_alvo = URL_LABCLINICA
-            sigla = "L"
-        else:
-            url_alvo = URL_CARDIOGRAFOS
-            sigla = "C"
-            
+        url_alvo = URL_SABRY if clinica_selecionada == "Sabry" else (URL_LABCLINICA if clinica_selecionada == "Labclinica" else URL_CARDIOGRAFOS)
+        sigla = clinica_selecionada[0]
         df = carregar_dados(url_alvo)
         
         if not df.empty:
@@ -94,9 +84,20 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 entrada_limpa = purificar(original)
                 if not entrada_limpa: continue
                 
-                busca_final = DICIONARIO_PADRAO.get(entrada_limpa, entrada_limpa)
-                match = df[df["NOME_PURIFICADO"].str.contains(busca_final, na=False)]
+                # BUSCA EM CASCATA
+                match = pd.DataFrame()
                 
+                # 1. Tenta sinônimos do mapa primeiro
+                if entrada_limpa in MAPA_GERAL:
+                    for termo in MAPA_GERAL[entrada_limpa]:
+                        match = df[df["NOME_PURIFICADO"].str.contains(termo, na=False)]
+                        if not match.empty: break
+                
+                # 2. Se não tem no mapa ou não achou nada, busca o termo direto
+                if match.empty:
+                    match = df[df["NOME_PURIFICADO"].str.contains(entrada_limpa, na=False)]
+                
+                # Filtro VHS
                 if not match.empty and "VHS" not in entrada_limpa:
                     match = match[~match["NOME_PURIFICADO"].str.fullmatch("VHS")]
 
@@ -104,9 +105,9 @@ if st.button("✨ GERAR ORÇAMENTO"):
                 preco = 0.0
 
                 if not match.empty:
-                    final = match.copy()
-                    final["tam"] = final["NOME_PURIFICADO"].str.len()
-                    res = final.sort_values("tam").iloc[0]
+                    match = match.copy()
+                    match["tam"] = match["NOME_PURIFICADO"].str.len()
+                    res = match.sort_values("tam").iloc[0]
                     nome_exame = res["NOME_ORIGINAL"]
                     
                     for col_val in res.values:
@@ -118,7 +119,7 @@ if st.button("✨ GERAR ORÇAMENTO"):
                                 preco = float(v[0])
                                 break
 
-                # Regra de Imagem Sabry
+                # Imagem Sabry
                 if nome_exame is None and clinica_selecionada == "Sabry":
                     if any(x in entrada_limpa for x in ["RM", "RESSONANCIA", "TC", "TOMOGRAFIA"]):
                         nome_exame = original.upper()
